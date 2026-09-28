@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#07090d">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="Read number plates from your camera, photos and videos. Runs entirely on your phone.">
+<title>PlateSight</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="app" id="app" data-mode="scan">
+
+  <header class="topbar">
+    <div class="brand"><span class="brand__mark" aria-hidden="true"></span><span>PlateSight</span></div>
+    <button class="status" id="status" type="button" aria-live="polite"><i class="dot"></i><span id="statusText">Starting…</span></button>
+    <button class="icon-btn" id="btnSettings" type="button" aria-label="Settings"></button>
+  </header>
+
+  <main class="views">
+    <!-- LIVE SCAN -->
+    <section class="view view--scan" id="view-scan" data-view="scan">
+      <div class="viewfinder" id="viewfinder">
+        <video id="cam" playsinline muted autoplay></video>
+        <canvas id="camOverlay" class="overlay"></canvas>
+        <div class="reticle" id="reticle" hidden><i></i><i></i><i></i><i></i><p>Point at a number plate</p></div>
+        <div class="hud" id="hud" hidden></div>
+        <div class="cam-empty" id="camEmpty">
+          <div class="hero-icon" id="camHeroIcon"></div>
+          <h2>Live plate scanning</h2>
+          <p id="camEmptyText">Point your camera at cars and PlateSight reads the plates as you go. Everything runs on this phone.</p>
+          <button class="btn btn--primary btn--lg" id="btnStartCam" type="button">Start camera</button>
+        </div>
+      </div>
+      <div class="tray" id="scanTray" aria-label="Plates found this session"></div>
+      <div class="scan-controls">
+        <button class="round-btn" id="btnTorch" type="button" aria-label="Torch" hidden></button>
+        <button class="shutter" id="btnScan" type="button" aria-label="Start scanning"><span></span></button>
+        <div class="zoom" id="zoomCtl" hidden></div>
+      </div>
+    </section>
+
+    <!-- PHOTO -->
+    <section class="view view--photo" id="view-photo" data-view="photo" hidden>
+      <div class="pane" id="photoEmpty">
+        <div class="empty-hero">
+          <div class="hero-icon" data-icon="photo"></div>
+          <h2>Read plates in a photo</h2>
+          <p>Take a picture or pick one from your gallery. Uses the high-accuracy models.</p>
+        </div>
+        <div class="action-stack">
+          <button class="btn btn--primary btn--lg" id="btnPhotoCam" type="button"></button>
+          <button class="btn btn--ghost btn--lg" id="btnPhotoPick" type="button"></button>
+        </div>
+        <p class="hint" id="shareHint">Tip: once installed, share a photo from your Gallery straight to PlateSight.</p>
+      </div>
+      <div class="pane" id="photoResult" hidden>
+        <div class="media-card">
+          <div class="media-stage" id="photoStage">
+            <img id="photoImg" alt="Selected photo">
+            <canvas id="photoOverlay" class="overlay"></canvas>
+            <div class="scanline" id="photoScan"></div>
+          </div>
+        </div>
+        <div class="result-head" id="photoHead"></div>
+        <div class="results" id="photoResults"></div>
+        <div class="action-row">
+          <button class="btn btn--ghost" id="btnPhotoAgain" type="button"></button>
+          <button class="btn btn--ghost" id="btnPhotoAgainPick" type="button"></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIDEO -->
+    <section class="view view--video" id="view-video" data-view="video" hidden>
+      <div class="pane" id="videoEmpty">
+        <div class="empty-hero">
+          <div class="hero-icon" data-icon="video"></div>
+          <h2>Find plates in a video</h2>
+          <p>Every plate that appears is tracked, read across many frames and listed with the moment it shows up.</p>
+        </div>
+        <div class="action-stack">
+          <button class="btn btn--primary btn--lg" id="btnVideoCam" type="button"></button>
+          <button class="btn btn--ghost btn--lg" id="btnVideoPick" type="button"></button>
+        </div>
+      </div>
+      <div class="pane" id="videoWork" hidden>
+        <div class="media-card">
+          <div class="media-stage media-stage--video" id="videoStage">
+            <video id="vid" playsinline muted></video>
+            <canvas id="vidOverlay" class="overlay"></canvas>
+          </div>
+          <div class="progress"><div id="vidBar"></div></div>
+          <div class="video-meta">
+            <span id="vidStatus">Preparing…</span>
+            <button class="chip-btn" id="btnVidStop" type="button"></button>
+          </div>
+        </div>
+        <div class="result-head" id="videoHead"></div>
+        <div class="results" id="videoResults"></div>
+        <div class="action-row" id="videoAgainRow" hidden>
+          <button class="btn btn--ghost" id="btnVideoAgain" type="button"></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- HISTORY -->
+    <section class="view view--history" id="view-history" data-view="history" hidden>
+      <div class="pane">
+        <div class="history-top">
+          <h2>History <span class="count" id="histCount"></span></h2>
+          <div class="history-actions">
+            <button class="icon-btn" id="btnExport" type="button" aria-label="Export CSV"></button>
+            <button class="icon-btn" id="btnClearHist" type="button" aria-label="Clear history"></button>
+          </div>
+        </div>
+        <label class="search"><span id="searchIcon"></span><input id="histSearch" type="search" placeholder="Search plates" autocomplete="off" spellcheck="false"></label>
+        <div id="histList" class="hist-list"></div>
+      </div>
+    </section>
+  </main>
+
+  <nav class="tabbar" id="tabbar">
+    <button type="button" data-mode="scan" class="on"><span data-icon="scan"></span><b>Scan</b></button>
+    <button type="button" data-mode="photo"><span data-icon="photo"></span><b>Photo</b></button>
+    <button type="button" data-mode="video"><span data-icon="video"></span><b>Video</b></button>
+    <button type="button" data-mode="history"><span data-icon="history"></span><b>History</b></button>
+  </nav>
+
+  <div class="backdrop" id="backdrop"></div>
+
+  <section class="sheet" id="sheetDetail" aria-hidden="true" role="dialog" aria-label="Plate details">
+    <div class="sheet__grip"></div>
+    <div id="detailBody"></div>
+  </section>
+
+  <section class="sheet" id="sheetSettings" aria-hidden="true" role="dialog" aria-label="Settings">
+    <div class="sheet__grip"></div>
+    <div class="sheet__title"><h2>Settings</h2><button class="icon-btn" data-close type="button" aria-label="Close"></button></div>
+    <div class="settings" id="settingsBody"></div>
+  </section>
+
+  <div class="toast" id="toast" role="status"></div>
+
+  <div class="boot" id="boot" hidden>
+    <div class="boot__card">
+      <div class="boot__logo"></div>
+      <h2 id="bootTitle">Setting up PlateSight</h2>
+      <p id="bootText">Downloading the on-device AI. This happens once, and nothing you scan ever leaves your phone.</p>
+      <div class="progress progress--lg"><div id="bootBar"></div></div>
+      <p class="boot__meta" id="bootMeta">&nbsp;</p>
+      <button class="btn btn--primary" id="bootRetry" type="button" hidden>Try again</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="filePhotoCam" accept="image/*" capture="environment" hidden>
+<input type="file" id="filePhoto" accept="image/*" hidden>
+<input type="file" id="fileVideoCam" accept="video/*" capture="environment" hidden>
+<input type="file" id="fileVideo" accept="video/*" hidden>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
