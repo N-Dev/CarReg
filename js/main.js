@@ -189,30 +189,31 @@ async function modelsCached(keys) {
 }
 
 async function startEngine() {
+  // A previous start that never finished (e.g. the tab crashed) means multi-threading is unsafe here.
   if (localStorage.getItem('ps_boot') === 'pending') localStorage.setItem('ps_force_safe', '1');
-  const safe = localStorage.getItem('ps_force_safe') === '1';
+  const forceSafe = localStorage.getItem('ps_force_safe') === '1';
   const need = ['det384', 'ocrFast'];
   const total = need.reduce((a, k) => a + MODELS[k].bytes, 0);
   const firstRun = !(await modelsCached(need));
   if (firstRun) showBoot(true);
   setStatus('loading', 'Loading AI…');
 
+  // Fastest setup first, then progressively safer ones, all without reloading the page.
+  const cores = Math.max(1, Math.min(4, navigator.hardwareConcurrency || 4));
+  const multi = self.crossOriginIsolated === true && cores > 1 && !forceSafe;
+  const attempts = [];
+  if (multi) attempts.push({ prefer: 'site', threads: cores, gpu: settings.gpu }, { prefer: 'cdn', threads: cores });
+  attempts.push({ prefer: 'site', threads: 1, safe: true }, { prefer: 'cdn', threads: 1, safe: true });
+
   const got = new Map();
-  let sawInit = false;
-  let watchdog = 0;
+  let hang = null;
   const onProgress = (e) => {
     const p = e.detail;
     if (!need.includes(p.key)) return;
     if (p.stage === 'init') {
-      sawInit = true;
       localStorage.setItem('ps_boot', 'pending');
-      if (!watchdog) {
-        watchdog = setTimeout(() => {
-          // Engine start hung (usually multi-threading on an unusual device): restart single-threaded.
-          localStorage.setItem('ps_force_safe', '1');
-          localStorage.setItem('ps_boot', 'ok');
-          location.reload();
-        }, 45000);
+      if (hang && !hang.timer) {
+        hang.timer = setTimeout(() => hang.reject(new Error('HANG: the AI engine stopped responding while starting')), 40000);
       }
       $('#bootMeta').textContent = 'Starting the AI engine…';
       return;
@@ -225,39 +226,55 @@ async function startEngine() {
     setStatus('loading', `Loading AI ${Math.round(f * 100)}%`);
   };
   engine.addEventListener('progress', onProgress);
-  engine.addEventListener('crash', () => { state.ready = false; setStatus('error', 'AI engine stopped'); toast('The AI engine stopped', { action: 'Restart', onAction: () => location.reload(), ms: 15000 }); });
+
+  const errors = [];
+  let threadTrouble = false;
   try {
-    $('#bootMeta').textContent = 'Loading the AI runtime…';
-    await engine.boot({ gpu: settings.gpu, safe });
-    await Promise.all(need.map((k) => engine.load(k)));
-    localStorage.setItem('ps_boot', 'ok');
-    state.ready = true;
-    setStatus('ready', engineLabel());
-    showBoot(false);
-    if (settings.gpu && engine.info.gpuError) toast('GPU isn’t available here, using the CPU');
-    if (safe) toast('Started in safe mode (one CPU core)', { action: 'Details', onAction: openSettings, ms: 6000 });
-  } catch (err) {
-    localStorage.setItem('ps_boot', 'ok');
-    const threaded = engine.info && (engine.info.threads > 1 || (engine.info.eps || [])[0] === 'webgpu');
-    if (sawInit && threaded && !safe) {
-      localStorage.setItem('ps_force_safe', '1');
-      showBoot(true);
-      $('#bootTitle').textContent = 'Restarting in safe mode…';
-      $('#bootText').textContent = 'The fast engine didn’t start on this phone, so PlateSight will use a single core.';
-      setTimeout(() => location.reload(), 1500);
+    for (const [i, a] of attempts.entries()) {
+      if (i > 0) $('#bootMeta').textContent = a.safe ? 'Retrying in safe mode (one core)…' : 'Retrying with the backup download…';
+      const guard = new Promise((_, reject) => { hang = { reject, timer: 0 }; });
+      const work = (async () => {
+        await engine.boot(a);
+        await Promise.all(need.map((k) => engine.load(k)));
+      })();
+      work.catch(() => {});
+      try {
+        await Promise.race([work, guard]);
+      } catch (err) {
+        clearTimeout(hang.timer);
+        engine.terminate();
+        errors.push(`${a.prefer}, ${a.threads} thread${a.threads > 1 ? 's' : ''}: ${err.message}`);
+        // Runtime or model downloads failing won't be fixed by a different engine setup.
+        if (/^(DOWNLOAD|RUNTIME):/.test(err.message)) break;
+        if (a.threads > 1) threadTrouble = true;
+        continue;
+      }
+      clearTimeout(hang.timer);
+      localStorage.setItem('ps_boot', 'ok');
+      if (a.safe && threadTrouble) localStorage.setItem('ps_force_safe', '1');
+      state.engineErrors = errors;
+      state.ready = true;
+      setStatus('ready', engineLabel());
+      showBoot(false);
+      if (settings.gpu && engine.info.gpuError) toast('GPU isn’t available here, using the CPU');
+      if (a.safe) toast('Running in safe mode (one CPU core)', { action: 'Details', onAction: openSettings, ms: 6000 });
       return;
     }
-    state.bootError = err;
+    localStorage.setItem('ps_boot', 'ok');
+    state.engineErrors = errors;
+    state.bootError = new Error(errors[errors.length - 1] || 'unknown error');
     setStatus('error', 'AI didn’t load');
     showBoot(true);
     $('#bootTitle').textContent = 'Couldn’t start the AI';
     $('#bootText').textContent = navigator.onLine === false
       ? 'You’re offline. The first launch needs internet to download the AI (about 15 MB). After that PlateSight works offline.'
-      : `Something went wrong while loading: ${err.message}`;
-    $('#bootMeta').textContent = '';
+      : 'PlateSight couldn’t load its AI engine. Check your connection and try again. If it keeps happening, send a screenshot of the details below.';
+    $('#bootBar').parentElement.hidden = true;
+    const meta = $('#bootMeta');
+    meta.classList.add('boot__meta--details');
+    meta.textContent = `${errors.join('\n')}\nisolated: ${self.crossOriginIsolated === true} · service worker: ${!!(navigator.serviceWorker && navigator.serviceWorker.controller)}`;
     $('#bootRetry').hidden = false;
   } finally {
-    clearTimeout(watchdog);
     engine.removeEventListener('progress', onProgress);
   }
 }
@@ -919,7 +936,7 @@ function renderSettings() {
   const seg = (key, opts) => `<div class="seg" data-setting="${key}">${opts.map(([v, l]) => `<button type="button" data-v="${v}" class="${settings[key] === v ? 'on' : ''}">${l}</button>`).join('')}</div>`;
   const sw = (key, title, sub) => `<div class="row"><div class="row__text"><b>${title}</b>${sub ? `<small>${sub}</small>` : ''}</div><button type="button" class="switch" role="switch" data-toggle="${key}" aria-checked="${!!settings[key]}" aria-label="${title}"></button></div>`;
   const engineText = state.ready
-    ? `ONNX Runtime ${i.version || ORT_VERSION} · ${i.ep === 'webgpu' ? 'GPU (WebGPU)' : `CPU · ${i.threads || 1} thread${i.threads > 1 ? 's' : ''}`}${i.safe ? ' · safe mode' : ''}`
+    ? `ONNX Runtime ${i.version || ORT_VERSION} · ${i.ep === 'webgpu' ? 'GPU (WebGPU)' : `CPU · ${i.threads || 1} thread${i.threads > 1 ? 's' : ''}`}${i.safe ? ' · safe mode' : ''} · from ${i.source === 'cdn' ? 'CDN' : 'this site'}`
     : (state.bootError ? `Not loaded: ${state.bootError.message}` : 'Loading…');
   const safe = localStorage.getItem('ps_force_safe') === '1';
   $('#settingsBody').innerHTML = `
@@ -1156,6 +1173,12 @@ async function main() {
   const sw = await setupServiceWorker(() => toast('PlateSight was updated', { action: 'Reload', onAction: () => location.reload(), ms: 12000 }));
   if (sw.reloading) return;
   state.booting = false;
+  engine.addEventListener('crash', () => {
+    if (!state.ready) return; // failures while starting are handled by startEngine's retries
+    state.ready = false;
+    setStatus('error', 'AI engine stopped');
+    toast('The AI engine stopped', { action: 'Restart', onAction: () => location.reload(), ms: 15000 });
+  });
   if (params.has('mode') || params.has('shared')) window.history.replaceState(null, '', location.pathname);
   if (params.get('shared')) openShared();
   if (state.mode === 'scan') maybeAutoStart();

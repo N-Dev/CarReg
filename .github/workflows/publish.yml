@@ -1,0 +1,48 @@
+# Publishes the app to the gh-pages branch (served by GitHub Pages) on every push to main.
+# It adds a copy of ONNX Runtime Web under ort/, so phones load the AI runtime from this site
+# instead of depending on a third-party CDN.
+name: Publish site
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-site
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add ONNX Runtime Web (version pinned in sw.js)
+        run: |
+          set -euo pipefail
+          VERSION=$(grep -oP "ORT_VERSION = '\K[0-9.]+" sw.js)
+          echo "ONNX Runtime Web ${VERSION}"
+          npm pack "onnxruntime-web@${VERSION}" --silent
+          tar -xzf "onnxruntime-web-${VERSION}.tgz"
+          mkdir -p ort
+          for f in ort.min.js ort.webgpu.min.js \
+                   ort-wasm-simd-threaded.mjs ort-wasm-simd-threaded.wasm \
+                   ort-wasm-simd-threaded.jsep.mjs ort-wasm-simd-threaded.jsep.wasm; do
+            cp "package/dist/$f" ort/
+          done
+          rm -rf package "onnxruntime-web-${VERSION}.tgz"
+          ls -la ort
+
+      - name: Publish to gh-pages
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan publish
+          git add -A
+          git commit -q -m "Publish ${GITHUB_SHA::7} with ONNX Runtime Web"
+          git push -f origin publish:gh-pages

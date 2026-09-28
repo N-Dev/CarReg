@@ -82,7 +82,7 @@ try:
         log("boot", round(time.time() - t0, 1), "s", json.dumps(info))
         check("service worker controls page", info["ctrl"])
         check("cross-origin isolated (multi-thread capable)", info["coi"])
-        check("runtime loaded via SW proxy of CDN", info["info"]["source"] == "app" and any("ort.min.js" in u for u in cdn_hits), f"cdn hits: {cdn_hits}")
+        check("runtime loaded via SW proxy of CDN", info["info"]["source"] == "site" and any("ort.min.js" in u for u in cdn_hits), f"cdn hits: {cdn_hits}")
         check("multi-threaded config", info["info"]["threads"] > 1, f"threads={info['info']['threads']}")
 
         # ---------------------------------------------------------------- live scan (fake camera)

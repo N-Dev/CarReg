@@ -235,19 +235,37 @@ async function thumbOf(bitmap, box) {
 
 // ---------------------------------------------------------------- commands
 const handlers = {
-  async init({ ortUrl, cdnBase, wasmPaths, threads, gpu, base }) {
-    let source = 'app';
-    try {
-      importScripts(ortUrl);
-    } catch (e) {
-      // Not served next to the app (e.g. service worker unavailable): use the CDN directly, single-threaded.
-      importScripts(cdnBase + ortUrl.split('/').pop());
-      wasmPaths = cdnBase;
-      threads = 1;
-      source = 'cdn';
+  async init({ siteBase, cdnBase, file, prefer = 'site', threads, gpu, base }) {
+    const why = (e) => String((e && e.message) || e)
+      .replace(/^Failed to execute 'importScripts' on 'WorkerGlobalScope': /, '')
+      .slice(0, 140);
+    // 1) The copy served by this site (published next to the app, or proxied by the service worker).
+    const fromSite = async () => { importScripts(siteBase + file); return siteBase; };
+    // 2) The CDN. A plain importScripts() of a CDN script is blocked when the page is cross-origin
+    //    isolated (the CDN sends no CORP header), but a CORS fetch is allowed: run it from a blob URL.
+    const fromCdn = async () => {
+      const res = await fetch(cdnBase + file, { mode: 'cors', credentials: 'omit' });
+      if (!res.ok) throw new Error(`HTTP ${res.status} from CDN`);
+      const url = URL.createObjectURL(new Blob([await res.text()], { type: 'text/javascript' }));
+      try { importScripts(url); } finally { URL.revokeObjectURL(url); }
+      return cdnBase;
+    };
+    const order = prefer === 'cdn' ? [['cdn', fromCdn], ['site', fromSite]] : [['site', fromSite], ['cdn', fromCdn]];
+    const tried = [];
+    let source = null;
+    let wasmPaths = null;
+    for (const [name, load] of order) {
+      try {
+        wasmPaths = await load();
+        if (!self.ort || !self.ort.InferenceSession) throw new Error('script ran but ONNX Runtime is missing');
+        source = name;
+        break;
+      } catch (e) {
+        tried.push(`${name}: ${why(e)}`);
+      }
     }
+    if (!source) throw new Error(`RUNTIME: ${tried.join(' | ')}`);
     ort = self.ort;
-    if (!ort || !ort.InferenceSession) throw new Error('The AI runtime did not load');
     ort.env.wasm.wasmPaths = wasmPaths;
     ort.env.wasm.numThreads = threads;
     ort.env.wasm.proxy = false;
@@ -260,6 +278,7 @@ const handlers = {
       threads,
       eps: EPS.slice(),
       source,
+      tried,
       coi: self.crossOriginIsolated === true,
       version: (ort.env.versions && ort.env.versions.web) || '',
     };
@@ -267,7 +286,12 @@ const handlers = {
 
   async load({ key, url, expected, kind, size }, id) {
     if (sessions.has(key)) return { key, cached: true };
-    const bytes = await fetchBytes(url, expected, (loaded, total) => self.postMessage({ id, progress: { key, loaded, total } }));
+    let bytes;
+    try {
+      bytes = await fetchBytes(url, expected, (loaded, total) => self.postMessage({ id, progress: { key, loaded, total } }));
+    } catch (e) {
+      throw new Error(`DOWNLOAD: ${(e && e.message) || e}`);
+    }
     return exclusive(async () => {
       self.postMessage({ id, progress: { key, stage: 'init' } });
       const t0 = performance.now();

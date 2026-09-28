@@ -72,32 +72,49 @@ export class Engine extends EventTarget {
     else p.reject(new Error(error));
   }
 
-  async boot({ gpu = false, safe = false } = {}) {
-    const controlled = !!(navigator.serviceWorker && navigator.serviceWorker.controller);
-    const ortBase = controlled ? new URL('ort/', APP_BASE).href : ORT_CDN;
-    const isolated = self.crossOriginIsolated === true;
-    const cores = navigator.hardwareConcurrency || 4;
-    const threads = !safe && isolated ? Math.max(1, Math.min(4, cores)) : 1;
-    const useGpu = !!gpu && !safe && 'gpu' in navigator;
+  /**
+   * Starts a fresh inference worker.
+   * prefer: 'site' (runtime copy published with the app) or 'cdn'; threads: 1 = single-core safe mode.
+   */
+  async boot({ gpu = false, threads = 1, prefer = 'site', safe = false } = {}) {
+    this.terminate();
+    const n = self.crossOriginIsolated === true ? Math.max(1, threads) : 1;
+    const useGpu = !!gpu && 'gpu' in navigator;
     this.worker = new Worker(new URL('./engine-worker.js', import.meta.url));
     this.worker.onmessage = (e) => this._onMessage(e);
     this.worker.onerror = (e) => {
-      const err = new Error(e.message || 'The AI engine crashed');
+      const err = new Error(`CRASH: ${e.message || 'the AI engine stopped'}`);
       for (const p of this.pending.values()) p.reject(err);
       this.pending.clear();
       this.dispatchEvent(new CustomEvent('crash', { detail: err }));
     };
-    const file = useGpu ? 'ort.webgpu.min.js' : 'ort.min.js';
     this.info = await this._rpc('init', {
-      ortUrl: ortBase + file,
+      siteBase: new URL('ort/', APP_BASE).href,
       cdnBase: ORT_CDN,
-      wasmPaths: ortBase,
-      threads,
+      file: useGpu ? 'ort.webgpu.min.js' : 'ort.min.js',
+      prefer,
+      threads: n,
       gpu: useGpu,
       base: APP_BASE,
     });
     this.info.safe = safe;
     return this.info;
+  }
+
+  /** Stops the worker (if any) and forgets loaded models; pending calls are rejected. */
+  terminate() {
+    if (this.worker) {
+      this.worker.onmessage = null;
+      this.worker.onerror = null;
+      this.worker.terminate();
+      this.worker = null;
+    }
+    const err = new Error('RESTART: engine restarted');
+    for (const p of this.pending.values()) p.reject(err);
+    this.pending.clear();
+    this.loads.clear();
+    this.ready.clear();
+    this.info = null;
   }
 
   /** Loads a model once; progress events carry { key, loaded, total } or { key, stage: 'init' }. */

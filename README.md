@@ -66,10 +66,11 @@ js/store.js                   settings and IndexedDB history
 sw.js, manifest.webmanifest   offline, install, share target
 models/                       detector (384/640) and OCR (fast/accurate) ONNX models
 tools/vendor_ort.py           optional: copy ONNX Runtime into ./ort so no CDN is needed
+.github/workflows/publish.yml on every push to main: publishes the site to gh-pages with its own copy of ONNX Runtime Web (ort/)
 tests/                        unit tests (node --test tests/*.test.mjs) and a browser end-to-end test
 ```
 
-**Changing the app:** bump `VERSION` in `sw.js` whenever you edit a file. Installed phones then pick up the update and show a "Reload" prompt.
+**Changing the app:** edit on `main` and bump `VERSION` in `sw.js`. The GitHub Action republishes the site within a minute or two; installed phones then pick up the update and show a "Reload" prompt.
 
 ## Troubleshooting
 
