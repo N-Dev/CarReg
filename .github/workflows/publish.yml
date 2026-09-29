@@ -2,7 +2,8 @@
 # only if every test passes.
 #   test     unit tests, then the end-to-end tests in Chromium emulating a Pixel 7 with a fake camera
 #            and the real ONNX Runtime Web (retried once, as browser timing can be flaky on shared runners).
-#            If they fail, logs and screenshots are pushed to the ci-logs branch for debugging.
+#            If they fail, logs and screenshots are pushed to the ci-logs branch for debugging (the branch
+#            is removed again once the tests pass).
 #   publish  adds ONNX Runtime Web under ort/ (so phones load the AI runtime from this site, not a CDN),
 #            stamps the build id into js/config.js and sw.js (which makes installed phones update) and
 #            pushes the result to gh-pages.
@@ -80,6 +81,10 @@ jobs:
           git add -A
           git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -q -m "CI logs for ${GITHUB_SHA::7}"
           git push -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ci-logs
+
+      - name: Remove old failure logs (tests pass again)
+        if: success()
+        run: git push origin --delete ci-logs 2>/dev/null || true
 
       - name: Keep screenshots
         if: always()
