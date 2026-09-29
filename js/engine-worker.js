@@ -129,7 +129,11 @@ async function detect(bitmap, key, conf, rect) {
     const x2 = clamp((d[b + 3] - left) / r + rect.x, 0, W);
     const y2 = clamp((d[b + 4] - top) / r + rect.y, 0, H);
     if (x2 - x1 < 4 || y2 - y1 < 3) continue;
-    boxes.push({ box: [x1, y1, x2, y2], score });
+    // Touching the edge of the analysed area: the plate is probably cut off, so its reading is partial.
+    const mx = Math.max(3, rect.w * 0.015);
+    const my = Math.max(3, rect.h * 0.015);
+    const edge = x1 <= rect.x + mx || y1 <= rect.y + my || x2 >= rect.x + rect.w - mx || y2 >= rect.y + rect.h - my;
+    boxes.push({ box: [x1, y1, x2, y2], score, edge });
   }
   return boxes;
 }

@@ -1,5 +1,5 @@
 import { Engine, MODELS, ORT_VERSION, setupServiceWorker } from './engine.js';
-import { Tracker, vote } from './tracker.js';
+import { Tracker, vote, iou } from './tracker.js';
 import { loadSettings, saveSettings, SENS, history as plates } from './store.js';
 import { clean, flagFor } from './formats.js';
 import {
@@ -125,7 +125,10 @@ function drawPlateBox(ctx, [x1, y1, x2, y2], { color, label, solid, alpha = 1, b
   }
   ctx.restore();
 }
-const toDet = (d) => ({ box: d.box, score: d.score, read: d.reads ? d.reads[0] : null, thumb: d.thumb || null });
+const toDet = (d) => ({
+  box: d.box, score: d.score, thumb: d.thumb || null,
+  read: d.reads ? { ...d.reads[0], partial: !!d.edge } : null, // cut off by the frame edge: only part of the plate
+});
 
 /** Collects confirmed plates by key, following a track even if its reading improves later. */
 class Board {
@@ -149,8 +152,10 @@ class Board {
     e.first = Math.min(e.first, t.first);
     e.last = Math.max(e.last, t.last);
     e.brief = e.brief && !t.confirmed;
-    if (t.thumb && t.thumbScore > e.thumbScore) {
-      try { e.thumbURL = bitmapToDataURL(t.thumb); e.thumbScore = t.thumbScore; } catch (_) { /* closed bitmap */ }
+    // Photo from a frame that read this plate, so the picture always matches the text.
+    const th = t.thumbFor(r.key);
+    if (th && th.score > e.thumbScore) {
+      try { e.thumbURL = bitmapToDataURL(th.bmp); e.thumbScore = th.score; } catch (_) { /* closed bitmap */ }
     }
     return e;
   }
@@ -488,8 +493,7 @@ function finishTracks(tracks, source) {
       const e = scan.board.put(t);
       savePlate(t.result, source, e ? e.thumbURL : null);
     }
-    if (t.thumb && t.thumb.close) t.thumb.close();
-    t.thumb = null;
+    t.closeThumbs();
   }
   refreshTray();
 }
@@ -546,9 +550,12 @@ function drawLive() {
   const now = performance.now();
   const topSafe = document.querySelector('.topbar').offsetHeight || 60;
   let visible = 0;
-  for (const t of scan.tracker.tracks) {
+  const tracks = scan.tracker.tracks;
+  for (const t of tracks) {
     const age = now - t.last;
     if (age > 700) continue;
+    // Don't draw a fading box on top of a fresher one in the same place.
+    if (age > 150 && tracks.some((o) => o !== t && o.last > t.last && iou(o.box, t.box) > 0.3)) continue;
     const target = t.predict(now);
     t.shown = t.shown.map((v, k) => v + (target[k] - v) * 0.35);
     const r = t.result;
@@ -752,8 +759,8 @@ function collectVideo(tracks, closeThumbs) {
   let changed = false;
   for (const t of tracks) {
     const r = t.result;
-    if (r && (t.confirmed || (r.valid && r.prob >= 0.9))) { vjob.board.put(t); changed = true; }
-    if (closeThumbs && t.thumb && t.thumb.close) { t.thumb.close(); t.thumb = null; }
+    if (r && (t.confirmed || (r.valid && r.prob >= 0.9 && t.fullReads() > 0))) { vjob.board.put(t); changed = true; }
+    if (closeThumbs) t.closeThumbs();
   }
   if (changed) renderVideoResults(false);
 }

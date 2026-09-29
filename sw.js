@@ -5,7 +5,7 @@
  * - Receives photos/videos shared to the installed app (Web Share Target).
  * Bump VERSION whenever you change any app file, so phones pick up the update.
  */
-const VERSION = '1.0.2';
+const VERSION = '1.0.3';
 const ORT_VERSION = '1.20.1';
 const ORT_CDN = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/`;
 

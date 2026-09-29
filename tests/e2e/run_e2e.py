@@ -23,6 +23,13 @@ VID = os.path.join(WORK, "two_cars.webm")
 if not os.path.exists(CAM):
     subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-loop", "1", "-i", f"{T}/car_ie.jpg", "-vf",
                     "crop=1280:720:'min(274,t*55)':'min(273,t*45)',format=yuv420p", "-t", "6", "-r", "15", CAM], check=True)
+PAIR = os.path.join(WORK, "cam_pair.y4m")
+if not os.path.exists(PAIR):  # car A, then a cut to car B with its plate at the same spot on screen
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-loop", "1", "-t", "3", "-i", f"{T}/car_a_12D15405.jpg",
+                    "-loop", "1", "-t", "3", "-i", f"{T}/car_b_201D8573.jpg", "-filter_complex",
+                    "[0:v]crop=560:993:'640+t*12':0,scale=720:1276,pad=720:1280:0:2,fps=15,format=yuv420p[a];"
+                    "[1:v]crop=560:993:'640+t*12':0,scale=720:1276,pad=720:1280:0:2,fps=15,format=yuv420p[b];[a][b]concat=n=2:v=1:a=0[v]",
+                    "-map", "[v]", PAIR], check=True)
 if not os.path.exists(VID):
     subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-loop", "1", "-i", f"{T}/two_cars.jpg", "-vf",
                     "crop=1280:720:'min(1828,t*230)':140,format=yuv420p", "-t", "8", "-r", "25", "-c:v", "libvpx", "-b:v", "3M", "-an", VID], check=True)
@@ -206,6 +213,33 @@ try:
         ot = page.eval_on_selector_all("#photoResults .plate strong", "els => els.map(e => e.textContent)")
         check("works fully offline after first launch", ot == ["241-D-12345"] and not blocked, f"{ot} blocked={blocked[:3]}")
         page.screenshot(path=f"{SHOTS}/13_offline_photo.png")
+        browser.close()
+
+        # ---------------------------------------------------------------- moving from one car to the next
+        browser = p.chromium.launch(args=["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream",
+                                          f"--use-file-for-fake-video-capture={PAIR}"])
+        ctx = browser.new_context(**dev, permissions=["camera"], service_workers="allow")
+        ctx.route("https://cdn.jsdelivr.net/**", cdn)
+        page = ctx.new_page()
+        page.on("pageerror", lambda e: logs.append(f"[pageerror] {e}"))
+        page.goto(BASE)
+        page.wait_for_function("() => window.__plateSight && window.__plateSight.state.ready", timeout=120000)
+        page.wait_for_function("() => window.__plateSight.scan.running", timeout=30000)
+        page.wait_for_timeout(13000)
+        page.click("#btnScan")
+        page.wait_for_timeout(1000)
+        entries = page.evaluate("() => window.__plateSight.scan.board.entries().map(e => ({ text: e.r.text, conf: e.r.conf, thumb: e.thumbURL }))")
+        def tint(url):
+            import io
+            from PIL import Image
+            im = Image.open(io.BytesIO(base64.b64decode(url.split(",", 1)[1]))).convert("RGB").resize((32, 16))
+            px = list(im.getdata()) if not hasattr(im, "get_flattened_data") else list(im.get_flattened_data())
+            r = sum(q[0] for q in px) / len(px); g = sum(q[1] for q in px) / len(px)
+            return "red" if r > g * 1.4 else "silver"
+        got = {e["text"]: (round(e["conf"], 2), tint(e["thumb"]) if e["thumb"] else None) for e in entries}
+        check("switching cars: two separate plates, each with its own photo",
+              got.get("12-D-15405", (0, None))[1] == "silver" and got.get("201-D-8573", (0, None))[1] == "red"
+              and len(got) == 2 and all(c >= 0.9 for c, _ in got.values()), str(got))
         browser.close()
 finally:
     srv.terminate()

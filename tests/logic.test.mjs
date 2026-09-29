@@ -88,3 +88,91 @@ test('single read is never confirmed on its own', () => {
   const out = tr.update([{ box: [0, 0, 100, 25], score: 0.9, read: R('241D12345') }], 0);
   assert.equal(out.confirmed.length, 0);
 });
+
+// ---------------------------------------------------------------- moving from one car to the next
+import { editDistance, similar } from '../js/tracker.js';
+
+test('edit distance and plate similarity', () => {
+  assert.equal(editDistance('12D15405', '12D15405'), 0);
+  assert.equal(editDistance('12D15405', '12D15406'), 1);
+  assert.ok(similar('241D12345', '241D12845'));      // one OCR slip: same plate
+  assert.ok(!similar('12D15405', '201D8573'));       // different plates
+});
+
+test('votes never blend two different plates into a third', () => {
+  const reads = [
+    ...Array(6).fill(0).map(() => R('12D15405')),
+    ...Array(4).fill(0).map(() => R('201D8573')),
+  ];
+  const r = vote(reads);
+  assert.equal(r.text, '12-D-15405');
+  assert.ok(r.conf < 0.7, `mixed reads must lower agreement, got ${r.conf}`);
+});
+
+test('a different plate in the same spot starts a new track and ends the old one', () => {
+  const tr = new Tracker({ format: 'auto' });
+  const box = [300, 600, 520, 660];
+  const thumbA = { id: 'A', close() {} };
+  const thumbB = { id: 'B', close() {} };
+  let t = 0;
+  const confirmed = [];
+  const lost = [];
+  for (let f = 0; f < 4; f++, t += 100) {
+    const out = tr.update([{ box, score: 0.9, read: R('12D15405'), thumb: f === 1 ? thumbA : null }], t);
+    confirmed.push(...out.confirmed); lost.push(...out.lost);
+  }
+  // User re-centres on the next car: same position, different plate.
+  for (let f = 0; f < 4; f++, t += 100) {
+    const out = tr.update([{ box, score: 0.9, read: R('201D8573'), thumb: f === 1 ? thumbB : null }], t);
+    confirmed.push(...out.confirmed); lost.push(...out.lost);
+  }
+  const texts = confirmed.map((x) => x.result.text);
+  assert.deepEqual(texts, ['12-D-15405', '201-D-8573']);
+  assert.equal(lost.length, 1, 'first car is finished as soon as the second plate replaces it');
+  assert.equal(lost[0].result.text, '12-D-15405');
+  assert.equal(lost[0].result.conf, 1, 'no reads of the second car leaked into the first');
+  assert.equal(lost[0].thumbFor(lost[0].result.key).bmp.id, 'A');
+  assert.equal(tr.tracks[0].thumbFor(tr.tracks[0].result.key).bmp.id, 'B');
+});
+
+test('an unsure read does not split a track', () => {
+  const tr = new Tracker();
+  const box = [0, 0, 200, 50];
+  for (let f = 0; f < 3; f++) tr.update([{ box, score: 0.9, read: R('12D15405') }], f * 100);
+  tr.update([{ box, score: 0.9, read: R('201D8573', 0.5) }], 400);   // blurry frame, low confidence
+  assert.equal(tr.tracks.length, 1);
+  assert.equal(tr.tracks[0].result.text, '12-D-15405');
+});
+
+// ---------------------------------------------------------------- plates cut off by the frame edge
+const P = (text, region = 'United Kingdom') => ({ ...R(text, 0.95, region), partial: true });
+
+test('a plate entering the frame cut off is read as one plate once fully visible', () => {
+  const tr = new Tracker();
+  const confirmed = [];
+  const box = (x) => [x, 300, x + 200, 350];
+  let t = 0;
+  for (const read of [P('AB12'), P('AB12'), P('AB12C')]) confirmed.push(...tr.update([{ box: box(700 - t / 10), score: 0.9, read }], t += 100).confirmed);
+  assert.equal(confirmed.length, 0, 'never confirmed from partial reads');
+  for (let f = 0; f < 3; f++) confirmed.push(...tr.update([{ box: box(690 - t / 10), score: 0.9, read: R('AB12CDE', 0.95, 'United Kingdom') }], t += 100).confirmed);
+  assert.equal(tr.tracks.length, 1);
+  assert.deepEqual(confirmed.map((x) => x.result.text), ['AB12 CDE']);
+});
+
+test('a plate leaving the frame keeps its full reading', () => {
+  const tr = new Tracker();
+  const box = [0, 300, 200, 350];
+  for (let f = 0; f < 3; f++) tr.update([{ box, score: 0.9, read: R('241D12345') }], f * 100);
+  tr.update([{ box: [0, 300, 120, 350], score: 0.8, read: P('D12345', 'Denmark') }], 300);
+  tr.update([{ box: [0, 300, 90, 350], score: 0.8, read: P('12345', 'Denmark') }], 400);
+  assert.equal(tr.tracks.length, 1);
+  assert.equal(tr.tracks[0].result.text, '241-D-12345');
+});
+
+test('a plate only ever seen cut off is never confirmed', () => {
+  const tr = new Tracker({ format: 'ANY' });
+  const out = [];
+  for (let f = 0; f < 6; f++) out.push(...tr.update([{ box: [0, 0, 90, 40], score: 0.9, read: P('D12345', 'Denmark') }], f * 100).confirmed);
+  out.push(...tr.flush().filter((x) => x.confirmed));
+  assert.equal(out.length, 0);
+});

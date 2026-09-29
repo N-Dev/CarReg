@@ -1,5 +1,5 @@
 // Multi-frame tracking and voting: turns noisy per-frame reads into one stable plate per vehicle.
-import { validate, profileFor, decode } from './formats.js';
+import { validate, profileFor, decode, clean } from './formats.js';
 
 const argmax = (map) => {
   let best = null;
@@ -8,6 +8,35 @@ const argmax = (map) => {
   return [best, bw];
 };
 const add = (map, k, w) => map.set(k, (map.get(k) || 0) + w);
+
+/** Levenshtein distance between two short strings. */
+export function editDistance(a, b) {
+  const m = a.length;
+  const n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+
+/** Same plate, allowing for OCR slips: up to a quarter of the characters may differ (at least one). */
+export function similar(a, b) {
+  if (!a || !b) return false;
+  return editDistance(a, b) <= Math.max(1, Math.floor(Math.max(a.length, b.length) * 0.25));
+}
+
+/** One reading is a fragment of the other (a plate partly out of view). */
+export function contains(a, b) {
+  if (!a || !b || Math.min(a.length, b.length) < 4) return false;
+  return a.includes(b) || b.includes(a);
+}
 
 /**
  * Consensus over OCR reads [{ text, conf, region, regionProb }].
@@ -31,15 +60,27 @@ export function vote(reads, format = 'auto', minConf = 0.35) {
   const profile = profileFor(format, region);
 
   const items = good
-    .map((r) => { const v = validate(r.text, profile); return { v, p: r.conf, w: r.conf * (v.valid ? 1.6 : 0.6) }; })
+    // Reads of a plate cut off by the frame edge count for much less.
+    .map((r) => { const v = validate(r.text, profile); return { v, p: r.conf, w: r.conf * (v.valid ? 1.6 : 0.6) * (r.partial ? 0.3 : 1) }; })
     .filter((x) => x.v.key);
   if (!items.length) return null;
 
-  // 1) dominant length, 2) weighted vote per character position.
+  // Only combine reads of the same plate: pick the strongest group of mutually similar reads,
+  // so reads of two different plates can never be blended into a made-up third one.
+  let anchor = items[0].v.key;
+  let anchorW = -1;
+  for (const k of new Set(items.map((x) => x.v.key))) {
+    let w = 0;
+    for (const x of items) if (similar(x.v.key, k)) w += x.w;
+    if (w > anchorW) { anchorW = w; anchor = k; }
+  }
+  const group = items.filter((x) => similar(x.v.key, anchor));
+
+  // Within the group: 1) dominant length, 2) weighted vote per character position.
   const byLen = new Map();
-  for (const x of items) add(byLen, x.v.key.length, x.w);
+  for (const x of group) add(byLen, x.v.key.length, x.w);
   const [len] = argmax(byLen);
-  const same = items.filter((x) => x.v.key.length === len);
+  const same = group.filter((x) => x.v.key.length === len);
   let chars = '';
   for (let i = 0; i < len; i++) {
     const sc = new Map();
@@ -48,9 +89,9 @@ export function vote(reads, format = 'auto', minConf = 0.35) {
   }
   let best = validate(chars, profile);
   if (!best.valid) {
-    // Character voting produced an invalid plate: fall back to the strongest valid read, if any.
+    // Character voting produced an invalid plate: fall back to the strongest valid read in the group, if any.
     const totals = new Map();
-    for (const x of items) if (x.v.valid) add(totals, x.v.key, x.w);
+    for (const x of group) if (x.v.valid) add(totals, x.v.key, x.w);
     const [k] = argmax(totals);
     if (k) best = validate(k, profile);
   }
@@ -82,6 +123,8 @@ export function iou(a, b) {
   return i / (area(a) + area(b) - i);
 }
 
+const closeBitmap = (b) => { if (b && b.close) b.close(); };
+
 export class Track {
   constructor(id, det, now, opts) {
     this.id = id;
@@ -94,14 +137,24 @@ export class Track {
     this.reads = [];
     this.result = null;
     this.confirmed = false;
-    this.thumb = null;
-    this.thumbScore = 0;
+    this.ended = false;
+    this.thumbs = new Map(); // plate text read in that frame -> { bmp, score }: best crop per reading
     this.observe(det, now, opts, true);
   }
 
   predict(now) {
     const dt = Math.min(Math.max(0, now - this.last), 400) / 1000;
     return this.box.map((v, k) => v + this.vel[k] * dt);
+  }
+
+  /** False when the detection confidently reads as a different plate from the one this track has settled on. */
+  accepts(det) {
+    const r = this.result;
+    const read = det.read;
+    if (!r || r.n < 2 || r.conf < 0.6) return true;             // no settled plate yet
+    if (!read || !read.text || read.partial || read.conf < 0.7 || (read.minP ?? 1) < 0.4) return true; // can't tell
+    const k = validate(read.text, r.profile).key;
+    return similar(k, r.key) || contains(k, r.key);
   }
 
   observe(det, now, opts, initial = false) {
@@ -119,20 +172,44 @@ export class Track {
       this.recompute(opts.format);
     }
     if (det.thumb) {
+      // Keep the best crop for each distinct reading, so the photo shown always matches the text shown.
+      const key = det.read && det.read.text ? clean(det.read.text) : '';
       const s = det.score * area(det.box) * ((det.read && det.read.conf) || 0.3);
-      if (s > this.thumbScore) {
-        if (this.thumb && this.thumb.close) this.thumb.close();
-        this.thumb = det.thumb;
-        this.thumbScore = s;
-      } else if (det.thumb.close) det.thumb.close();
+      const cur = this.thumbs.get(key);
+      if (!cur || s > cur.score) {
+        if (cur) closeBitmap(cur.bmp);
+        this.thumbs.set(key, { bmp: det.thumb, score: s });
+        if (this.thumbs.size > 6) {
+          let worst = null;
+          for (const [k, v] of this.thumbs) if (!worst || v.score < worst[1].score) worst = [k, v];
+          closeBitmap(worst[1].bmp);
+          this.thumbs.delete(worst[0]);
+        }
+      } else closeBitmap(det.thumb);
     }
+  }
+
+  /** Best crop whose reading matches `key` (the plate shown), or null. */
+  thumbFor(key) {
+    let best = null;
+    for (const [k, v] of this.thumbs) if (k && similar(k, key) && (!best || v.score > best.score)) best = v;
+    return best;
+  }
+
+  closeThumbs() {
+    for (const v of this.thumbs.values()) closeBitmap(v.bmp);
+    this.thumbs.clear();
   }
 
   recompute(format) { this.result = vote(this.reads, format); }
 
+  /** Reads of the whole plate (not cut off by the frame edge). */
+  fullReads() { return this.reads.filter((x) => !x.partial).length; }
+
   confirmable(opts) {
     const r = this.result;
     if (!r || r.n < opts.minReads || r.conf < opts.minAgree) return false;
+    if (this.fullReads() < opts.minReads) return false; // never confirm a plate only ever seen cut off
     return r.valid || (r.n >= 4 && r.conf >= 0.8 && r.prob >= 0.85);
   }
 }
@@ -153,6 +230,7 @@ export class Tracker {
   update(dets, now) {
     const preds = this.tracks.map((t) => t.predict(now));
     const pairs = [];
+    const displaced = new Set();
     dets.forEach((d, i) => {
       preds.forEach((p, j) => {
         const o = iou(d.box, p);
@@ -161,7 +239,10 @@ export class Tracker {
         const size = Math.max(p[2] - p[0], p[3] - p[1], 1);
         const dist = Math.hypot(cx, cy) / size;
         const s = o >= this.opts.iou ? o : dist < 0.8 ? (0.8 - dist) * 0.1 : 0;
-        if (s > 0) pairs.push([s, i, j]);
+        if (s <= 0) return;
+        if (this.tracks[j].accepts(d)) pairs.push([s, i, j]);
+        // A different plate now sits where this track's plate was: the camera has moved on to another car.
+        else if (o >= 0.3 || dist < 0.5) displaced.add(j);
       });
     });
     pairs.sort((a, b) => b[0] - a[0]);
@@ -173,6 +254,7 @@ export class Tracker {
       usedT.add(j);
       this.tracks[j].observe(dets[i], now, this.opts);
     }
+    for (const j of displaced) if (!usedT.has(j)) this.tracks[j].ended = true;
     dets.forEach((d, i) => {
       if (!usedD.has(i)) this.tracks.push(new Track(this.nextId++, d, now, this.opts));
     });
@@ -182,7 +264,7 @@ export class Tracker {
     const keep = [];
     for (const t of this.tracks) {
       if (!t.confirmed && t.confirmable(this.opts)) { t.confirmed = true; confirmed.push(t); }
-      (now - t.last > this.opts.maxAge ? lost : keep).push(t);
+      (t.ended || now - t.last > this.opts.maxAge ? lost : keep).push(t);
     }
     this.tracks = keep;
     return { confirmed, lost };
