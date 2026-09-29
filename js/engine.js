@@ -19,7 +19,9 @@ export async function setupServiceWorker(onUpdate) {
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return { sw: false };
   try {
     const hadController = !!navigator.serviceWorker.controller;
-    const reg = await navigator.serviceWorker.register(new URL('sw.js', APP_BASE).href);
+    // updateViaCache 'none': update checks fetch sw.js *and* js/config.js fresh, so the service worker
+    // never runs a new build with an older config left in the browser's HTTP cache.
+    const reg = await navigator.serviceWorker.register(new URL('sw.js', APP_BASE).href, { updateViaCache: 'none' });
     if (!hadController) {
       if (sessionStorage.getItem('ps_sw_reload')) return { sw: false, reg };
       await new Promise((resolve) => {

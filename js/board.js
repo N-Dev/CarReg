@@ -8,7 +8,8 @@ import { score } from './ctx.js';
 export function closeDet(d) { for (const k of ['thumb', 'crop', 'ocrInput']) if (d[k] && d[k].close) d[k].close(); }
 
 export class Board {
-  constructor() { this.map = new Map(); this.byTrack = new Map(); }
+  /** max: most plates kept (oldest dropped first). Live scanning caps it; a video keeps every plate. */
+  constructor({ max = Infinity } = {}) { this.map = new Map(); this.byTrack = new Map(); this.max = max; }
 
   put(t, debug = false) {
     const r = t.result;
@@ -22,6 +23,8 @@ export class Board {
     if (!e) {
       e = { key: r.key, r, rTrack: t.id, first: t.first, last: t.last, tracks: new Set(), thumbURL: null, thumbScore: 0, brief: !t.confirmed, created: performance.now() };
       this.map.set(r.key, e);
+      // Plates are saved to history when their track ends, so dropping old ones here loses nothing.
+      if (this.map.size > this.max) this.remove(this.map.keys().next().value);
     }
     e.tracks.add(t.id);
     this.byTrack.set(t.id, r.key);

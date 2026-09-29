@@ -147,7 +147,9 @@ async function ortFile(name, event) {
 
   let res = null;
   let type = 'basic';
-  try { res = await genuine(await fetch(key), name); } catch (_) { /* not hosted locally */ }
+  // The runtime's file names don't change between versions, so skip the HTTP cache (the service
+  // worker keeps its own copy per version anyway).
+  try { res = await genuine(await fetch(key, { cache: 'no-cache' }), name); } catch (_) { /* not hosted locally */ }
   if (!res) {
     const cdn = await fetch(ORT_CDN + name, { mode: 'cors', credentials: 'omit' });
     type = cdn.type;

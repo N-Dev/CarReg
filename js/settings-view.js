@@ -57,7 +57,9 @@ export function renderSettings() {
     </div></div>
     <div class="group"><h4>Performance</h4><div class="group__box">
       <div class="row"><div class="row__text"><b>AI engine</b><small>${esc(engineText)}</small></div></div>
-      ${sw('gpu', 'GPU acceleration (beta)', `Uses WebGPU when the phone supports it. Downloads a larger engine (${mb(CFG.ort.gpu.wasmBytes)}) the first time.`)}
+      ${sw('gpu', 'GPU acceleration (beta)', 'gpu' in navigator
+    ? `Uses WebGPU. Downloads a larger engine (${mb(CFG.ort.gpu.wasmBytes)}) the first time.`
+    : 'This browser doesn’t offer WebGPU, so the CPU is used either way.')}
       ${safeModeOn() ? '<div class="row"><div class="row__text"><b>Safe mode is on</b><small>The fast engine failed to start on this version, so PlateSight is using one CPU core. Try the fast engine again?</small></div><button type="button" class="chip-btn" data-action="unsafe">Try again</button></div>' : ''}
     </div></div>
     <div class="group"><h4>Privacy &amp; data</h4><div class="group__box">

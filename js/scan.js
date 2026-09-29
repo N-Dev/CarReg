@@ -16,7 +16,7 @@ const PERF_KEEP = 150;    // frames kept for the speed graph and diagnostics
 
 export const scan = {
   stream: null, track: null, running: false, loop: 0, tracker: null, frameW: 0, frameH: 0,
-  fps: 0, lastT: 0, ms: null, wake: null, torch: false, zoom: 1, board: new Board(), resume: false,
+  fps: 0, lastT: 0, ms: null, wake: null, torch: false, zoom: 1, board: new Board({ max: 120 }), resume: false,
   adaptive: new Adaptive({ mode: settings.quality }), idle: new Idle(), isIdle: false,
   pressure: null, simPressure: null, perf: [], frames: 0, last: null, fetching: false, wantFailedAt: -1e9,
 };

@@ -259,3 +259,20 @@ print(json.dumps({i.filename: [i.file_size, i.date_time[:5]] for i in z.infolist
   assert.deepEqual(r['set/images/00001.jpg'], [3000, [2026, 9, 29, 14, 30]]);
   assert.equal(r.text, 'héllo plates\n');
 });
+
+test('board: a long live session keeps the newest plates, a video keeps them all', async () => {
+  globalThis.self = globalThis;
+  self.PS_CONFIG = loadConfig();
+  const { Board } = await import('../js/board.js');
+  const track = (id) => ({
+    id, result: { key: `K${id}`, text: `K${id}`, conf: 1, prob: 1, n: 3 }, first: id, last: id, confirmed: true, reads: [], hits: 3,
+    thumbFor: () => null, cropFor: () => null, inputFor: () => null,
+  });
+  const live = new Board({ max: 3 });
+  for (let i = 1; i <= 5; i++) live.put(track(i));
+  assert.deepEqual(live.entries().map((e) => e.key), ['K3', 'K4', 'K5']);
+  assert.equal(live.byTrack.size, 3, 'dropped plates release their tracks');
+  const video = new Board();
+  for (let i = 1; i <= 200; i++) video.put(track(i));
+  assert.equal(video.entries().length, 200);
+});
