@@ -496,12 +496,19 @@ def section_upgrade(p, dev):
     ctx, page = new_page(browser, dev)
     page.goto(BASE)
     page.wait_for_function(READY, timeout=120000)
+    # The service worker finishes saving the downloads in the background; on a fast machine the AI can
+    # be ready a moment before that, so wait for both models to be saved.
+    for _ in range(100):
+        if page.evaluate("async () => (await (await caches.open('ps-models')).keys()).length") >= 2:
+            break
+        page.wait_for_timeout(100)
     # Rewind this install to the 1.0 layout: models cached under their plain URLs in 'ps-models-v1',
     # no release recorded, and the old service worker gone.
-    page.evaluate("""async () => {
+    copied = page.evaluate("""async () => {
         const now = await caches.open('ps-models');
         const old = await caches.open('ps-models-v1');
-        for (const req of await now.keys()) {
+        const reqs = await now.keys();
+        for (const req of reqs) {
             const u = new URL(req.url); u.search = '';
             await old.put(u.href, await now.match(req));
         }
@@ -509,6 +516,7 @@ def section_upgrade(p, dev):
         localStorage.removeItem('ps_release');
         localStorage.setItem('ps_boot', 'ok');
         for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
+        return reqs.length;
     }""")
     downloads = []
     ctx.route("**/*.onnx*", lambda route: (downloads.append(route.request.url), route.continue_()))
@@ -522,7 +530,7 @@ def section_upgrade(p, dev):
     caches = page.evaluate("() => caches.keys()")
     boot_shown = page.evaluate("() => !document.querySelector('#boot').hidden")
     check("upgrading from 1.0: downloaded models carry over, no re-download", not downloads and "ps-models-v1" not in caches and "ps-models" in caches and not boot_shown,
-          f"downloads={downloads} caches={caches}")
+          f"copied={copied} downloads={downloads} caches={caches}")
     check("upgrading from 1.0: what's new is shown", news)
     browser.close()
 
