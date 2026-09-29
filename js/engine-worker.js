@@ -4,7 +4,9 @@
  */
 'use strict';
 
-let ort = null;
+// ONNX Runtime namespace. Deliberately not named `ort`: the runtime's script declares a global
+// `var ort`, and a top-level `let ort` here would make that script fail to run.
+let rt = null;
 let OCR = null;             // OCR config: alphabet, slots, regions
 let EPS = ['wasm'];
 let gpuError = null;
@@ -112,7 +114,7 @@ async function detect(bitmap, key, conf, rect) {
     f[i + n] = px[p + 1] / 255;
     f[i + 2 * n] = px[p + 2] / 255;
   }
-  const out = await sess.run({ [sess.inputNames[0]]: new ort.Tensor('float32', f, [1, 3, S, S]) });
+  const out = await sess.run({ [sess.inputNames[0]]: new rt.Tensor('float32', f, [1, 3, S, S]) });
   const o = out[sess.outputNames[0]];
   const d = o.data;
   const rows = o.dims[0] || 0;
@@ -179,7 +181,7 @@ async function ocr(bitmap, key, boxes, variants) {
     let o = k * H * W * 3;
     for (let p = 0; p < px.length; p += 4) { arr[o++] = px[p]; arr[o++] = px[p + 1]; arr[o++] = px[p + 2]; }
   });
-  const out = await sess.run({ [sess.inputNames[0]]: new ort.Tensor('uint8', arr, [N, H, W, 3]) });
+  const out = await sess.run({ [sess.inputNames[0]]: new rt.Tensor('uint8', arr, [N, H, W, 3]) });
   const plate = out.plate || out[sess.outputNames[0]];
   const region = out.region || null;
   const V = A.length;
@@ -265,11 +267,11 @@ const handlers = {
       }
     }
     if (!source) throw new Error(`RUNTIME: ${tried.join(' | ')}`);
-    ort = self.ort;
-    ort.env.wasm.wasmPaths = wasmPaths;
-    ort.env.wasm.numThreads = threads;
-    ort.env.wasm.proxy = false;
-    ort.env.logLevel = 'error';
+    rt = self.ort;
+    rt.env.wasm.wasmPaths = wasmPaths;
+    rt.env.wasm.numThreads = threads;
+    rt.env.wasm.proxy = false;
+    rt.env.logLevel = 'error';
     EPS = gpu && self.navigator.gpu ? ['webgpu', 'wasm'] : ['wasm'];
     const res = await fetch(new URL('models/ocr.json', base).href);
     if (!res.ok) throw new Error('Could not load models/ocr.json');
@@ -280,7 +282,7 @@ const handlers = {
       source,
       tried,
       coi: self.crossOriginIsolated === true,
-      version: (ort.env.versions && ort.env.versions.web) || '',
+      version: (rt.env.versions && rt.env.versions.web) || '',
     };
   },
 
@@ -298,19 +300,19 @@ const handlers = {
       const opts = { executionProviders: EPS, graphOptimizationLevel: 'all' };
       let sess;
       try {
-        sess = await ort.InferenceSession.create(bytes, opts);
+        sess = await rt.InferenceSession.create(bytes, opts);
       } catch (e) {
         if (EPS[0] === 'wasm') throw e;
         gpuError = String((e && e.message) || e);
         EPS = ['wasm'];
-        sess = await ort.InferenceSession.create(bytes, { ...opts, executionProviders: EPS });
+        sess = await rt.InferenceSession.create(bytes, { ...opts, executionProviders: EPS });
       }
       sessions.set(key, { sess, meta: { kind, size } });
       // Warm-up run: the first inference allocates buffers and is much slower.
       if (kind === 'det') {
-        await sess.run({ [sess.inputNames[0]]: new ort.Tensor('float32', new Float32Array(3 * size * size), [1, 3, size, size]) });
+        await sess.run({ [sess.inputNames[0]]: new rt.Tensor('float32', new Float32Array(3 * size * size), [1, 3, size, size]) });
       } else {
-        await sess.run({ [sess.inputNames[0]]: new ort.Tensor('uint8', new Uint8Array(OCR.img_height * OCR.img_width * 3), [1, OCR.img_height, OCR.img_width, 3]) });
+        await sess.run({ [sess.inputNames[0]]: new rt.Tensor('uint8', new Uint8Array(OCR.img_height * OCR.img_width * 3), [1, OCR.img_height, OCR.img_width, 3]) });
       }
       return { key, ms: Math.round(performance.now() - t0), ep: EPS[0], gpuError };
     });

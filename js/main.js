@@ -1170,7 +1170,11 @@ async function main() {
   const params = new URLSearchParams(location.search);
   state.booting = true;
   setMode(params.get('mode') || 'scan');
-  const sw = await setupServiceWorker(() => toast('PlateSight was updated', { action: 'Reload', onAction: () => location.reload(), ms: 12000 }));
+  const sw = await setupServiceWorker(() => {
+    // A new version took over. If the AI isn't running (e.g. stuck on an error), switch to it straight away.
+    if (!state.ready) location.reload();
+    else toast('PlateSight was updated', { action: 'Reload', onAction: () => location.reload(), ms: 12000 });
+  });
   if (sw.reloading) return;
   state.booting = false;
   engine.addEventListener('crash', () => {

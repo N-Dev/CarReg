@@ -1,6 +1,8 @@
 /* Test stand-in for ONNX Runtime Web: same API surface the app uses (env, Tensor, InferenceSession),
  * but each run() is executed by the harness server with Python onnxruntime on the real models. */
-(function () {
+// Declared exactly like the real bundle (`var ort = (() => {...})()`), so a clashing global in the app fails here too.
+"use strict";
+var ort = (function () {
   const origin = self.location.origin;
   class Tensor {
     constructor(type, data, dims) { this.type = type; this.data = data; this.dims = dims; this.size = data.length; }
@@ -52,5 +54,5 @@
     }
     async release() {}
   }
-  self.ort = { Tensor, InferenceSession, env };
+  return { Tensor, InferenceSession, env };
 })();

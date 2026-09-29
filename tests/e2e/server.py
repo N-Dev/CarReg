@@ -1,6 +1,7 @@
 """Static server for the app + bridge endpoints that run ONNX models with Python onnxruntime."""
 import hashlib
 import json
+import os
 import struct
 import sys
 import threading
@@ -12,6 +13,7 @@ import numpy as np
 import onnxruntime as ort
 
 APP = sys.argv[1]
+ORT_DIR = os.environ.get("ORT_DIR")  # optional: serve real ONNX Runtime Web files at /ort/ (like the published site)
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 8765
 SESSIONS = {}
 LOG = {"loads": [], "runs": {}, "env": []}
@@ -40,6 +42,12 @@ class H(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         p = urlparse(self.path).path
+        if ORT_DIR and p.startswith("/ort/"):
+            f = os.path.join(ORT_DIR, os.path.basename(p))
+            if not os.path.isfile(f):
+                return self._send(404, b"not found", "text/html")
+            ctype = {"js": "application/javascript", "mjs": "application/javascript", "wasm": "application/wasm"}.get(f.rsplit(".", 1)[-1], "application/octet-stream")
+            return self._send(200, open(f, "rb").read(), ctype)
         if p == "/__log":
             return self._send(200, json.dumps(LOG).encode(), "application/json")
         return super().do_GET()

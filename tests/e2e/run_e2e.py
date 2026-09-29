@@ -44,7 +44,10 @@ def check(name, cond, detail=""):
     log(("PASS" if cond else "FAIL"), name, detail)
 
 
-srv = subprocess.Popen([sys.executable, f"{H}/server.py", APP, str(PORT)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+# REAL_ORT=/path/to/onnxruntime-web/dist runs the real WASM runtime (served at /ort/ like the published site)
+REAL_ORT = os.environ.get("REAL_ORT")
+srv_env = dict(os.environ, **({"ORT_DIR": REAL_ORT} if REAL_ORT else {}))
+srv = subprocess.Popen([sys.executable, f"{H}/server.py", APP, str(PORT)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=srv_env)
 time.sleep(1.0)
 
 try:
@@ -62,7 +65,7 @@ try:
             url = route.request.url
             cdn_hits.append(url)
             name = url.rsplit("/", 1)[-1]
-            if name in ("ort.min.js", "ort.webgpu.min.js"):
+            if name in ("ort.min.js", "ort.webgpu.min.js") and not REAL_ORT:
                 route.fulfill(status=200, body=MOCK, headers={"Content-Type": "text/javascript", "Access-Control-Allow-Origin": "*"})
             else:
                 route.fulfill(status=404, body="nope")
@@ -82,7 +85,10 @@ try:
         log("boot", round(time.time() - t0, 1), "s", json.dumps(info))
         check("service worker controls page", info["ctrl"])
         check("cross-origin isolated (multi-thread capable)", info["coi"])
-        check("runtime loaded via SW proxy of CDN", info["info"]["source"] == "site" and any("ort.min.js" in u for u in cdn_hits), f"cdn hits: {cdn_hits}")
+        if REAL_ORT:
+            check("real runtime loaded from the site copy", info["info"]["source"] == "site" and not cdn_hits and info["info"]["version"] != "mock", f"version={info['info']['version']} cdn hits: {cdn_hits}")
+        else:
+            check("runtime loaded via SW proxy of CDN", info["info"]["source"] == "site" and any("ort.min.js" in u for u in cdn_hits), f"cdn hits: {cdn_hits}")
         check("multi-threaded config", info["info"]["threads"] > 1, f"threads={info['info']['threads']}")
 
         # ---------------------------------------------------------------- live scan (fake camera)
