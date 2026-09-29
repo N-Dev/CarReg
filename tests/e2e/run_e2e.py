@@ -11,6 +11,7 @@ Sections:
   debug     developer easter egg, live debug overlay, read inspector, field test, debug panel,
             benchmark, accuracy stats, training-set export, quality override, history privacy
   slow      slow first launch (no false "hang", no safe mode) and an update arriving mid-download
+  upgrade   a phone upgrading from 1.0: downloaded models carry over, "What's new" once
   fallback  a damaged copy of the AI runtime on the site (real runtime only)
   gpu       GPU mode on WebGPU (real runtime only; Chromium's software WebGPU adapter)
 Run a subset with SECTIONS=debug,slow.
@@ -59,7 +60,7 @@ PORT = 8765
 BASE = f"http://127.0.0.1:{PORT}/"
 MOCK = open(f"{H}/mock-ort.js").read()
 REAL_ORT = os.environ.get("REAL_ORT")
-SECTIONS = [s for s in os.environ.get("SECTIONS", "main,cars,debug,slow,fallback,gpu").split(",") if s]
+SECTIONS = [s for s in os.environ.get("SECTIONS", "main,cars,debug,slow,upgrade,fallback,gpu").split(",") if s]
 results = {}
 logs = []
 cdn_hits = []
@@ -484,6 +485,45 @@ def section_slow(p, dev):
     except Exception:
         offered = False
     check("...and the update is offered once the AI is ready", offered, page.inner_text("#toast"))
+    browser.close()
+
+
+# ==================================================================== upgrading an existing install
+def section_upgrade(p, dev):
+    """A phone that had PlateSight 1.0 installed: its downloaded models must carry over (no 11 MB
+    re-download) and "What's new" must appear once."""
+    browser = launch(p)
+    ctx, page = new_page(browser, dev)
+    page.goto(BASE)
+    page.wait_for_function(READY, timeout=120000)
+    # Rewind this install to the 1.0 layout: models cached under their plain URLs in 'ps-models-v1',
+    # no release recorded, and the old service worker gone.
+    page.evaluate("""async () => {
+        const now = await caches.open('ps-models');
+        const old = await caches.open('ps-models-v1');
+        for (const req of await now.keys()) {
+            const u = new URL(req.url); u.search = '';
+            await old.put(u.href, await now.match(req));
+        }
+        await caches.delete('ps-models');
+        localStorage.removeItem('ps_release');
+        localStorage.setItem('ps_boot', 'ok');
+        for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
+    }""")
+    downloads = []
+    ctx.route("**/*.onnx*", lambda route: (downloads.append(route.request.url), route.continue_()))
+    page.reload()
+    page.wait_for_function(READY, timeout=120000)
+    try:
+        page.wait_for_selector("#sheetNew.open", timeout=8000)
+        news = True
+    except Exception:
+        news = False
+    caches = page.evaluate("() => caches.keys()")
+    boot_shown = page.evaluate("() => !document.querySelector('#boot').hidden")
+    check("upgrading from 1.0: downloaded models carry over, no re-download", not downloads and "ps-models-v1" not in caches and "ps-models" in caches and not boot_shown,
+          f"downloads={downloads} caches={caches}")
+    check("upgrading from 1.0: what's new is shown", news)
     browser.close()
 
 
