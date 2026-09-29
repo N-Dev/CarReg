@@ -26,7 +26,7 @@ const state = {
   ready: false, error: null, model: null, running: false, loop: 0, camera: false, editing: false,
   session: null, sessionId: null, counted: [], frames: 0, fpsT: [], ms: [], lastMove: 0, idle: false,
   aspect: 9 / 16, roi: [0, 0, 1, 1], lastRecord: null, flash: new Map(), pausedAt: null, lastTouch: Date.now(),
-  updateWaiting: false, battery: null, totals: emptyTotals(), stages: [], seen: 0,
+  updateWaiting: false, battery: null, totals: emptyTotals(), stages: [], seen: 0, stale: 0,
 };
 let counter = null;
 
@@ -160,6 +160,8 @@ function stopCamera() {
   if (state.stream) state.stream.getTracks().forEach((t) => t.stop());
   state.stream = null;
   state.camera = false;
+  frames.video = null; // watch the next stream's frames afresh
+  for (const w of frames.waiters.splice(0)) w();
   $('#cam').srcObject = null;
   state.loop++;
 }
@@ -186,10 +188,14 @@ function watchFrames(v) {
   };
   v.requestVideoFrameCallback(cb);
 }
-/** Resolves as soon as there's a camera frame newer than `seen` (or after 100 ms, whatever happens). */
+/**
+ * Resolves true as soon as there's a camera frame newer than `seen`, or false after 100 ms without one
+ * (or when frames can't be watched): the loop then goes on with the picture as it is and the clock time.
+ */
 function newFrame(seen) {
-  if (!frames.video || frames.n > seen) return Promise.resolve();
-  return new Promise((r) => { frames.waiters.push(r); setTimeout(r, 100); });
+  if (!frames.video) return Promise.resolve(false);
+  if (frames.n > seen) return Promise.resolve(true);
+  return new Promise((r) => { frames.waiters.push(() => r(true)); setTimeout(() => r(frames.n > seen), 100); });
 }
 
 // ---------------------------------------------------------------- the counting loop
@@ -204,9 +210,12 @@ async function loop(id) {
     if (!state.ready || cam.readyState < 2 || !cam.videoWidth) { await sleep(150); continue; }
     const t0 = performance.now();
     watchFrames(cam);
-    await newFrame(state.seen);
+    const fresh = await newFrame(state.seen);
     state.seen = frames.n;
-    const t = frames.video ? frames.t : performance.now();
+    const t = fresh ? frames.t : performance.now();
+    // Frames stopped being reported (a new video stream, say): start watching again.
+    state.stale = fresh || !frames.video ? 0 : state.stale + 1;
+    if (state.stale > 5) { frames.video = null; state.stale = 0; }
     const t1 = performance.now();
     const W = cam.videoWidth;
     const H = cam.videoHeight;
@@ -845,7 +854,7 @@ async function main() {
 
 // Test hooks for the browser tests.
 window.__trafficSight = {
-  state, settings, engine, store, startCounting, stopCounting, showResults, openEditor, closeEditor,
+  state, settings, engine, store, startCounting, stopCounting, showResults, openEditor, closeEditor, startCamera, stopCamera,
   get counter() { return counter; },
   applySetup(cfg) { Object.assign(settings, cfg); saveSettings(settings); newCounter(); },
 };

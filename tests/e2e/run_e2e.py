@@ -680,6 +680,15 @@ def section_counter(p, dev):
     except Exception:
         pass
     page.screenshot(path=f"{SHOTS}/40_counter_live.png")
+    # The camera stops and starts again (the app went to the background): speeds must still be right.
+    page.evaluate("() => { __trafficSight.stopCamera(); __trafficSight.state.counted.length = 0; }")
+    page.wait_for_timeout(800)
+    page.evaluate("() => __trafficSight.startCamera()")
+    try:
+        page.wait_for_function("""() => { const c = __trafficSight.state.counted;
+            return c.some(r => r.dir === 1 && r.speed) && c.some(r => r.dir === 2 && r.speed); }""", timeout=150000)
+    except Exception:
+        pass
     recs = page.evaluate("() => __trafficSight.state.counted")
     first = {d: next((r for r in recs if r["dir"] == d and r["speed"]), None) for d in (1, 2)}
     east, west = first[1], first[2]
