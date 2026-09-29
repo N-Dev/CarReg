@@ -14,6 +14,8 @@ Sections:
   slow      slow first launch (no false "hang", no safe mode) and an update arriving mid-download
   upgrade   a phone upgrading from 1.0: downloaded models carry over, "What's new" once
   datasaver Data Saver: Auto never downloads the sharper models, but uses them once on the phone
+  counter   TrafficSight (count/): counts, directions and speeds on a synthetic road, results, CSV,
+            council report, offline, and living alongside PlateSight
   fallback  a damaged copy of the AI runtime on the site (real runtime only)
   gpu       GPU mode on WebGPU (real runtime only; Chromium's software WebGPU adapter)
 Run a subset with SECTIONS=debug,slow.
@@ -57,12 +59,24 @@ if not os.path.exists(PAIR):  # car A, then a cut to car B with its plate at the
 if not os.path.exists(VID):
     ffmpeg("-loop", "1", "-i", f"{T}/two_cars.jpg", "-vf", "crop=1280:720:'min(1828,t*230)':140,format=yuv420p", "-t", "8", "-r", "25",
            "-c:v", "libvpx", "-b:v", "3M", "-an", VID)
+TRAFFIC = os.path.join(WORK, "traffic.y4m")
+if not os.path.exists(TRAFFIC):
+    # TrafficSight's road, 960 x 540, looping every 11 s: car A drives left to right in the near lane at
+    # 160 px/s, then car B right to left in the far lane at 240 px/s. With lines at 35% and 65% of the
+    # width (288 px) set 20 m apart, that's 40 km/h and 60 km/h.
+    ffmpeg("-i", f"{T}/car_ie.jpg", "-vf", "crop=1220:690:140:125,scale=300:-2", f"{WORK}/car_a.png")
+    ffmpeg("-i", f"{T}/two_cars.jpg", "-vf", "crop=1190:690:1690:118,scale=220:-2", f"{WORK}/car_b.png")
+    ffmpeg("-f", "lavfi", "-i", "color=c=#9aa7b4:s=960x540:r=15:d=11", "-f", "lavfi", "-i", "color=c=#3b3e44:s=960x220",
+           "-f", "lavfi", "-i", "color=c=#c9c4b8:s=960x70", "-loop", "1", "-i", f"{WORK}/car_a.png", "-loop", "1", "-i", f"{WORK}/car_b.png",
+           "-filter_complex", "[0:v][1:v]overlay=0:250[r];[r][2:v]overlay=0:470[p];[p]drawbox=x=0:y=357:w=960:h=5:color=white@0.8:t=fill[l];"
+           "[l][4:v]overlay=x='960-240*(t-5.2)':y=350-h:shortest=1[b];[b][3:v]overlay=x='-300+160*t':y=462-h:shortest=1,format=yuv420p",
+           "-t", "11", "-r", "15", TRAFFIC)
 
 PORT = 8765
 BASE = f"http://127.0.0.1:{PORT}/"
 MOCK = open(f"{H}/mock-ort.js").read()
 REAL_ORT = os.environ.get("REAL_ORT")
-SECTIONS = [s for s in os.environ.get("SECTIONS", "main,cars,debug,slow,upgrade,datasaver,fallback,gpu").split(",") if s]
+SECTIONS = [s for s in os.environ.get("SECTIONS", "main,cars,debug,slow,upgrade,datasaver,counter,fallback,gpu").split(",") if s]
 results = {}
 logs = []
 cdn_hits = []
@@ -605,6 +619,120 @@ def section_datasaver(p, dev):
     msgs = page.evaluate("() => window.__plateSight.logEntries().map(e => e.msg)")
     check("Data Saver: Auto steps up to models already on the phone, without downloading", ok and not downloads and any("already on the phone" in m for m in msgs),
           f"{json.dumps(r)} downloads={downloads}")
+    browser.close()
+
+
+# ==================================================================== TrafficSight (count/)
+TC_READY = "() => window.__trafficSight && window.__trafficSight.state.ready && window.__trafficSight.state.camera && window.__trafficSight.state.frames > 2"
+
+
+def section_counter(p, dev):
+    """TrafficSight on a synthetic road: opened on a phone that already has PlateSight, counts both cars
+    with their directions and speeds, then results, CSV, the council report and offline use."""
+    browser = launch(p, TRAFFIC)
+    land = dict(dev, viewport={"width": 915, "height": 412}, screen={"width": 915, "height": 412})
+    ctx, page = new_page(browser, land)
+    # PlateSight first: its service worker must leave count/ to TrafficSight's own.
+    page.goto(BASE)
+    page.wait_for_function(READY, timeout=180000)
+    page.goto(BASE + "count/")
+    page.wait_for_function(TC_READY, timeout=240000)
+    info = page.evaluate("""() => ({ title: document.title, model: __trafficSight.state.model, bench: __trafficSight.state.benchMs,
+        threads: __trafficSight.engine.info && __trafficSight.engine.info.threads, coi: self.crossOriginIsolated,
+        sw: navigator.serviceWorker.controller && navigator.serviceWorker.controller.scriptURL })""")
+    check("TrafficSight opens from its own address on a phone with PlateSight, multi-core, with its own service worker",
+          info["title"] == "TrafficSight" and info["coi"] and info["threads"] > 1 and info["sw"].endswith("/count/sw.js"), json.dumps(info))
+
+    page.click("#btnSetup")
+    page.wait_for_selector("#setup:not([hidden])", timeout=5000)
+    page.wait_for_timeout(400)
+    page.screenshot(path=f"{SHOTS}/39_counter_setup.png")
+    page.evaluate("() => __trafficSight.closeEditor(false)")
+    page.evaluate("""() => __trafficSight.applySetup({ lines: { a: [0.35, 0.35, 0.35, 0.95], b: [0.65, 0.35, 0.65, 0.95] }, distanceM: 20,
+        limit: 50, dirNames: ['Eastbound', 'Westbound'], site: 'Test Road', setupDone: true })""")
+    page.evaluate("() => __trafficSight.startCounting()")
+    # The screen dims while counting and wakes on a tap.
+    page.evaluate("() => { __trafficSight.settings.dimAfter = 1; }")
+    try:
+        page.wait_for_selector("#dim:not([hidden])", timeout=8000)
+        dimmed = True
+    except Exception:
+        dimmed = False
+    page.screenshot(path=f"{SHOTS}/40b_counter_dim.png")
+    page.click("#dim")
+    page.evaluate("() => { __trafficSight.settings.dimAfter = 0; }")
+    page.wait_for_timeout(300)
+    check("counting: the screen dims to save battery and wakes on a tap", dimmed and page.evaluate("() => document.querySelector('#dim').hidden"))
+    try:
+        page.wait_for_function("""() => { const c = __trafficSight.state.counted;
+            return c.some(r => r.dir === 1 && r.speed) && c.some(r => r.dir === 2 && r.speed); }""", timeout=150000)
+    except Exception:
+        pass
+    page.screenshot(path=f"{SHOTS}/40_counter_live.png")
+    recs = page.evaluate("() => __trafficSight.state.counted")
+    first = {d: next((r for r in recs if r["dir"] == d and r["speed"]), None) for d in (1, 2)}
+    east, west = first[1], first[2]
+    vehicles = all(r["kind"] in ("car", "truck", "bus") for r in recs)
+    per_dir = [sum(1 for r in recs if r["dir"] == d) for d in (1, 2)]
+    check("counter: each car counted once, in its direction, as a vehicle", east and west and vehicles and max(per_dir) <= 2, f"{per_dir} {json.dumps(recs)[:500]}")
+    check("counter: speeds between the lines (40 and 60 km/h, within 15%)",
+          east and west and abs(east["speed"] - 40) <= 6 and abs(west["speed"] - 60) <= 9,
+          f"east={east and east['speed']} west={west and west['speed']} fps={page.evaluate('() => __trafficSight.state.fpsT.length / 5')}")
+
+    page.evaluate("() => __trafficSight.stopCounting()")
+    page.wait_for_timeout(500)
+    page.evaluate("() => __trafficSight.showResults(__trafficSight.state.sessionId)")
+    page.wait_for_selector("#results .tiles .tile", timeout=15000)
+    page.wait_for_timeout(500)
+    res = page.evaluate("""() => {
+        const ink = (id) => { const c = document.getElementById(id); const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+            let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i]) n++; return n; };
+        return { tiles: document.querySelector('#results .tiles').innerText, hours: ink('chHours'), speeds: ink('chSpeeds'),
+                 rows: document.querySelectorAll('#results .numbers tbody tr').length }; }""")
+    check("results: figures, hourly chart and speed chart", "Motor vehicles" in res["tiles"] and res["hours"] > 500 and res["speeds"] > 500 and res["rows"] > 3,
+          json.dumps(res)[:300])
+    page.set_viewport_size({"width": 915, "height": 2400})  # the whole results page in one picture
+    page.wait_for_timeout(600)
+    page.screenshot(path=f"{SHOTS}/41_counter_results.png")
+    page.set_viewport_size({"width": 915, "height": 412})
+    with page.expect_download(timeout=20000) as dl:
+        page.click("#btnCSV")
+    csv = open(dl.value.path(), encoding="utf-8").read()
+    with page.expect_download(timeout=20000) as dl2:
+        page.click("#btnReport")
+    pdf = open(dl2.value.path(), "rb").read()
+    check("results: CSV export and the council report (PDF)",
+          csv.startswith("time,type,direction,speed_kmh,length_m,site") and "Eastbound" in csv and "Westbound" in csv and "Test Road" in csv
+          and time.strftime("%Y-%m-%d") in csv and "1970-" not in csv
+          and pdf.startswith(b"%PDF-1.4") and b"Test Road" in pdf and b"Eastbound" in pdf and pdf.rstrip().endswith(b"%%EOF"),
+          f"{csv[:160]!r} pdf={len(pdf)} bytes")
+
+    page.click("#btnSettings")
+    page.wait_for_selector("#sheetSettings.open", timeout=5000)
+    page.wait_for_timeout(400)
+    page.screenshot(path=f"{SHOTS}/42_counter_settings.png")
+    page.click("#backdrop", position={"x": 20, "y": 20})
+    # Held upright: the picture on top, the counts underneath.
+    page.click("#btnResults")
+    page.set_viewport_size({"width": 412, "height": 915})
+    page.wait_for_timeout(1500)
+    page.screenshot(path=f"{SHOTS}/43_counter_portrait.png")
+    page.set_viewport_size({"width": 915, "height": 412})
+
+    # Offline: everything it needs is on the phone.
+    ctx.set_offline(True)
+    page.reload()
+    try:
+        page.wait_for_function(TC_READY, timeout=120000)
+        ok = True
+    except Exception:
+        ok = False
+    ctx.set_offline(False)
+    check("TrafficSight works offline after the first start", ok and page.evaluate("() => document.title") == "TrafficSight")
+    # PlateSight is still PlateSight.
+    page.goto(BASE)
+    page.wait_for_function(READY, timeout=120000)
+    check("PlateSight is unaffected", page.evaluate("() => document.title") == "PlateSight")
     browser.close()
 
 

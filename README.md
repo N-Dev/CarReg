@@ -13,6 +13,8 @@ It knows Irish plates well: it corrects misreads using the format (e.g. `24lD123
 
 **Open it on your phone:** <https://n-dev.github.io/CarReg/> (in Chrome → ⋮ → Install app)
 
+This repository also has **TrafficSight**, a traffic counter: see [TrafficSight](#trafficsight-count-the-traffic-on-your-road) below.
+
 ## Using it
 
 | Tab | What it does |
@@ -118,6 +120,34 @@ There are no version numbers to bump by hand. To change the ONNX Runtime version
 - **Slow or hot:** leave Quality on Auto, or choose Fast. Keep sensitivity on Medium and get closer or use zoom.
 - **Anything odd:** turn on developer mode, then Debug panel → Overview → **Copy diagnostics**, and paste it into your bug report.
 
+## TrafficSight: count the traffic on your road
+
+**Open it on your phone:** <https://n-dev.github.io/CarReg/count/> (in Chrome → ⋮ → Install app; it has its own icon)
+
+Stand a phone at a window, side-on to the road and plugged in. TrafficSight counts **cars, vans & trucks, buses, motorbikes, bicycles, people, dogs and horses**, in each direction, and times every road user between two lines you mark on the road to get its speed. It keeps only what passed and when: no images, video or number plates, and it runs entirely on the phone.
+
+1. **Set up:** drag line **A** and line **B** across the road at two marks you can measure between (lamp posts, gateposts, road markings, 10–30 m apart), enter the distance, the speed limit, and what each direction means ("towards the village").
+2. **Start counting.** Each road user is counted once, when it first crosses a line; crossing both gives its speed (the distance divided by the time between the lines) and its length. The screen dims after a minute to save battery; tap to wake. If the phone was put in the background, the gap is noted.
+3. **Results:** every session is kept with motor vehicles per hour by direction, the busiest hour, speeds (average, **85th percentile**, fastest, and how many went over the limit), a speed chart, and counts of everything. Export a **CSV** (one row per road user) or a one-page **PDF report for the council**.
+
+Good to know:
+
+- A cyclist or horse rider counts once, as the bicycle or horse. Vans and lorries are one group ("vans & trucks"); vehicles measured at 7.5 m or more are reported as **long vehicles**.
+- Speeds are estimates: they depend on measuring the distance between the lines accurately and on the phone being side-on to the road. They haven't been checked against a calibrated speed gun.
+- Counts are a minimum: a vehicle completely hidden behind another can be missed, and small things far away (a dog on the far footpath) are harder to see.
+- The detector is YOLOX (Apache-2.0), in two sizes: Standard (20 MB) and Light (3.7 MB). **Auto** times the phone at start-up and uses Light if Standard is too slow, and switches mid-session if the phone can't keep up.
+
+How it works: `count/` is its own installable web app with its own service worker, sharing PlateSight's copy of ONNX Runtime Web (`ort/`) and its `js/config.js` (runtime version and build id). Frames are cropped to the area around the lines, run through YOLOX in a Web Worker, tracked from frame to frame (`count/js/counter.js`), and a road user is counted when its track crosses a line; crossing times are interpolated between frames, so speeds stay accurate at low frame rates.
+
+```
+count/index.html, app.css       UI                      count/sw.js    offline, cross-origin isolation, shared runtime
+count/js/main.js                screens, camera, loop   count/js/worker.js   YOLOX in ONNX Runtime Web
+count/js/counter.js             tracking, lines, speeds count/js/stats.js    figures, CSV
+count/js/report.js, pdf.js      council report (PDF)    count/js/charts.js   results charts
+count/js/store.js               sessions (IndexedDB)    count/js/config.js   model files and versions
+count/models/                   YOLOX tiny and nano (COCO), from github.com/Megvii-BaseDetection/YOLOX
+```
+
 ## Privacy
 
 All processing happens on the device. Number plates are personal data under GDPR, so scan where you have a good reason to and don't keep or share plates of people you don't know. History deletes itself after 30 days by default; you can shorten that, keep only the text without photos, or turn history off in Settings. Field-test samples (developer mode) stay on the phone until you export or clear them.
@@ -127,3 +157,4 @@ All processing happens on the device. Number plates are personal data under GDPR
 - Plate finder: [open-image-models](https://github.com/ankandrew/open-image-models) (MIT).
 - Plate reader: [fast-plate-ocr](https://github.com/ankandrew/fast-plate-ocr) (MIT).
 - Runtime: [ONNX Runtime Web](https://onnxruntime.ai) (MIT).
+- TrafficSight detector: [YOLOX](https://github.com/Megvii-BaseDetection/YOLOX) (Megvii, Apache-2.0), trained on COCO.

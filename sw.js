@@ -66,6 +66,7 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url);
   if (url.origin !== SCOPE.origin || !url.pathname.startsWith(SCOPE.pathname)) return;
   const rel = url.pathname.slice(SCOPE.pathname.length);
+  if (rel.startsWith('count/')) return; // TrafficSight, which has its own service worker
 
   if (req.method === 'POST' && rel === 'share-target') {
     event.respondWith(receiveShare(req));

@@ -482,9 +482,10 @@ async function onPanelClick(e) {
       action: 'Clear',
       ms: 6000,
       onAction: async () => {
-        for (const k of await caches.keys()) await caches.delete(k);
-        const regs = await navigator.serviceWorker.getRegistrations();
-        await Promise.all(regs.map((r) => r.unregister()));
+        // PlateSight's own caches and service worker only: TrafficSight (count/) shares this site.
+        for (const k of await caches.keys()) if (k.startsWith('ps-')) await caches.delete(k);
+        const reg = await navigator.serviceWorker.getRegistration();
+        if (reg) await reg.unregister();
         location.reload();
       },
     });
