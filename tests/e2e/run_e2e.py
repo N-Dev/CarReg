@@ -631,6 +631,17 @@ def section_counter(p, dev):
     with their directions and speeds, then results, CSV, the council report and offline use."""
     browser = launch(p, TRAFFIC)
     land = dict(dev, viewport={"width": 915, "height": 412}, screen={"width": 915, "height": 412})
+    # A phone without PlateSight: TrafficSight's own service worker must serve the AI runtime (and the
+    # worker threads it starts) with the isolation headers, or the AI never starts.
+    ctx0, page0 = new_page(browser, land)
+    page0.goto(BASE + "count/")
+    try:
+        page0.wait_for_function(TC_READY, timeout=120000)
+        alone = page0.evaluate("() => ({ threads: __trafficSight.engine.info.threads, fps: __trafficSight.state.fpsT.length })")
+    except Exception:
+        alone = None
+    check("TrafficSight starts on a phone without PlateSight, multi-core", alone and alone["threads"] > 1, json.dumps(alone))
+    ctx0.close()
     ctx, page = new_page(browser, land)
     # PlateSight first: its service worker must leave count/ to TrafficSight's own.
     page.goto(BASE)

@@ -180,33 +180,28 @@ const handlers = {
   },
 
   /**
-   * Road users in a frame. roi: the part of the frame to analyse, as fractions [x, y, w, h].
-   * Returns boxes as fractions of the whole frame.
+   * Road users in a frame. The page sends only the part of the frame around the counting lines,
+   * already shrunk to fit the model: `crop` is where that part is in the frame [x, y, w, h] and
+   * `frame` the frame's size [W, H], in pixels. Returns boxes as fractions of the whole frame.
    */
-  detect({ bitmap, key, roi = [0, 0, 1, 1], conf = 0.3 }) {
+  detect({ bitmap, key, crop, frame, conf = 0.3 }) {
     return exclusive(async () => {
       const t0 = now();
       try {
         const s = sessions.get(key);
         if (!s) throw new Error(`Model ${key} is not loaded`);
         const S = s.size;
-        const W = bitmap.width;
-        const H = bitmap.height;
-        const rx = Math.round(roi[0] * W);
-        const ry = Math.round(roi[1] * H);
-        const rw = Math.max(1, Math.round(roi[2] * W));
-        const rh = Math.max(1, Math.round(roi[3] * H));
-        const r = Math.min(S / rw, S / rh);
-        const nw = Math.round(rw * r);
-        const nh = Math.round(rh * r);
+        const [W, H] = frame || [bitmap.width, bitmap.height];
+        const [rx, ry, rw] = crop || [0, 0, bitmap.width, bitmap.height];
+        const r = bitmap.width / rw; // the page's scale from frame pixels to model pixels
+        const nw = Math.min(S, bitmap.width);
+        const nh = Math.min(S, bitmap.height);
         if (!cv) { cv = new OffscreenCanvas(S, S); ctx = cv.getContext('2d', { willReadFrequently: true }); }
         if (cv.width !== S) { cv.width = S; cv.height = S; }
         // As YOLOX was trained: the picture in the top-left corner, grey (114) padding, BGR, 0-255.
         ctx.fillStyle = 'rgb(114,114,114)';
         ctx.fillRect(0, 0, S, S);
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'medium';
-        ctx.drawImage(bitmap, rx, ry, rw, rh, 0, 0, nw, nh);
+        ctx.drawImage(bitmap, 0, 0, nw, nh, 0, 0, nw, nh);
         const px = ctx.getImageData(0, 0, S, S).data;
         const n = S * S;
         if (!input || input.length !== 3 * n) input = new Float32Array(3 * n);

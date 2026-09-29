@@ -135,7 +135,8 @@ Good to know:
 - A cyclist or horse rider counts once, as the bicycle or horse. Vans and lorries are one group ("vans & trucks"); vehicles measured at 7.5 m or more are reported as **long vehicles**.
 - Speeds are estimates: they depend on measuring the distance between the lines accurately and on the phone being side-on to the road. They haven't been checked against a calibrated speed gun.
 - Counts are a minimum: a vehicle completely hidden behind another can be missed, and small things far away (a dog on the far footpath) are harder to see.
-- The detector is YOLOX (Apache-2.0), in two sizes: Standard (20 MB) and Light (3.7 MB). **Auto** times the phone at start-up and uses Light if Standard is too slow, and switches mid-session if the phone can't keep up.
+- The detector is YOLOX (Apache-2.0), in two sizes: Standard (20 MB) and Light (3.7 MB). **Auto** times the phone at start-up and keeps Standard only if it manages about 15 frames a second, and switches to Light mid-session if the phone can't keep up.
+- **Frame rate** (Settings): *Fastest* analyses every camera frame the phone keeps up with (8 a second while nothing moves); *Cooler* about 10 a second (3 while nothing moves), for long or warm sessions. Tap the status at the top to see the frame rate and where each frame's time goes.
 
 How it works: `count/` is its own installable web app with its own service worker, sharing PlateSight's copy of ONNX Runtime Web (`ort/`) and its `js/config.js` (runtime version and build id). Frames are cropped to the area around the lines, run through YOLOX in a Web Worker, tracked from frame to frame (`count/js/counter.js`), and a road user is counted when its track crosses a line; crossing times are interpolated between frames, so speeds stay accurate at low frame rates.
 

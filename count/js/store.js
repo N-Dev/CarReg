@@ -12,6 +12,7 @@ export const DEFAULTS = {
   model: 'auto',          // auto | tiny | nano
   sensitivity: 'medium',  // low | medium | high
   dimAfter: 60,           // seconds without a touch before the screen dims while counting (0 = never)
+  pace: 'fast',           // fast: every frame the phone keeps up with | cool: about 10 a second, for long warm sessions
   setupDone: false,
 };
 export const SENS = { low: 0.45, medium: 0.3, high: 0.2 };

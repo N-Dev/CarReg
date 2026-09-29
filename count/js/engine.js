@@ -84,8 +84,9 @@ export class Engine extends EventTarget {
       this.dispatchEvent(new CustomEvent('crash', { detail: err }));
     };
     const cpu = PS.ort.cpu;
+    // count/ort/ is PlateSight's published runtime (../ort/), served through TrafficSight's service worker.
     this.info = await this._rpc('init', {
-      siteBase: new URL('ort/', SITE).href, cdnBase: ORT_CDN, ort: { script: cpu.script, wasm: cpu.wasm, wasmBytes: cpu.wasmBytes }, threads: n,
+      siteBase: new URL('ort/', BASE).href, cdnBase: ORT_CDN, ort: { script: cpu.script, wasm: cpu.wasm, wasmBytes: cpu.wasmBytes }, threads: n,
     });
     return this.info;
   }

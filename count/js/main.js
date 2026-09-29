@@ -12,9 +12,11 @@ const fmt = (n) => Number(n).toLocaleString('en-IE');
 const pad2 = (n) => String(n).padStart(2, '0');
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const ACTIVE_MS = 110;  // aim: ~9 frames a second while something is moving
-const IDLE_MS = 300;    // ~3 a second when nothing is
+// Minimum time between analysed frames: while something moves, and while nothing has for a few seconds.
+// "Fastest" takes every new camera frame the phone can keep up with; "Cooler" is for long, warm sessions.
+const PACE = { fast: { active: 0, idle: 125 }, cool: { active: 100, idle: 333 } };
 const IDLE_AFTER = 3000;
+const TINY_MAX_MS = 60; // Auto keeps the standard model only while it runs this fast (about 15 frames a second)
 
 const settings = loadSettings();
 const engine = new Engine();
@@ -24,7 +26,7 @@ const state = {
   ready: false, error: null, model: null, running: false, loop: 0, camera: false, editing: false,
   session: null, sessionId: null, counted: [], frames: 0, fpsT: [], ms: [], lastMove: 0, idle: false,
   aspect: 9 / 16, roi: [0, 0, 1, 1], lastRecord: null, flash: new Map(), pausedAt: null, lastTouch: Date.now(),
-  updateWaiting: false, battery: null, totals: emptyTotals(),
+  updateWaiting: false, battery: null, totals: emptyTotals(), stages: [], seen: 0,
 };
 let counter = null;
 
@@ -105,7 +107,7 @@ async function startEngine() {
     if (settings.model === 'auto') {
       // Time the standard model; on a slow phone, switch to the light one.
       const b = await engine.bench('tiny', 6);
-      if (b.p50 > 170) { await engine.load('nano'); state.model = 'nano'; }
+      if (b.p50 > TINY_MAX_MS) { await engine.load('nano'); state.model = 'nano'; }
       state.benchMs = b.p50;
     }
     state.ready = true;
@@ -169,19 +171,25 @@ async function maybeAutoStartCamera() {
   } catch (_) { /* wait for a tap */ }
 }
 
-/** Time of the next camera frame (the moment it was captured, when the browser says). */
-function nextFrame(v) {
-  return new Promise((resolve) => {
-    let done = false;
-    const finish = (t) => {
-      if (done) return;
-      done = true;
-      const now = performance.now();
-      resolve(Number.isFinite(t) && Math.abs(t - now) < 2000 ? t : now); // same clock as performance.now(), or not used
-    };
-    if (v.requestVideoFrameCallback) v.requestVideoFrameCallback((now, md) => finish(md.captureTime || md.presentationTime || now));
-    setTimeout(() => finish(performance.now()), 150);
-  });
+// The camera's frames as they arrive: a count and the newest one's capture time, so the loop can take
+// the latest frame straight away instead of waiting for the next (worth up to a frame interval).
+const frames = { n: 0, t: 0, waiters: [], video: null };
+function watchFrames(v) {
+  if (!v.requestVideoFrameCallback || frames.video === v) return;
+  frames.video = v;
+  const cb = (now, md) => {
+    const ts = md.captureTime || md.presentationTime || now;
+    frames.t = Number.isFinite(ts) && Math.abs(ts - performance.now()) < 2000 ? ts : performance.now(); // performance.now()'s clock
+    frames.n++;
+    for (const w of frames.waiters.splice(0)) w();
+    if (state.camera) v.requestVideoFrameCallback(cb); else frames.video = null;
+  };
+  v.requestVideoFrameCallback(cb);
+}
+/** Resolves as soon as there's a camera frame newer than `seen` (or after 100 ms, whatever happens). */
+function newFrame(seen) {
+  if (!frames.video || frames.n > seen) return Promise.resolve();
+  return new Promise((r) => { frames.waiters.push(r); setTimeout(r, 100); });
 }
 
 // ---------------------------------------------------------------- the counting loop
@@ -195,23 +203,42 @@ async function loop(id) {
   while (state.camera && id === state.loop) {
     if (!state.ready || cam.readyState < 2 || !cam.videoWidth) { await sleep(150); continue; }
     const t0 = performance.now();
-    const t = await nextFrame(cam);
-    let bmp;
-    try { bmp = await createImageBitmap(cam); } catch (_) { await sleep(60); continue; }
-    const aspect = bmp.height / bmp.width;
+    watchFrames(cam);
+    await newFrame(state.seen);
+    state.seen = frames.n;
+    const t = frames.video ? frames.t : performance.now();
+    const t1 = performance.now();
+    const W = cam.videoWidth;
+    const H = cam.videoHeight;
+    const aspect = H / W;
     if (!counter || Math.abs(aspect - state.aspect) > 0.01) {
       if (counter && state.running) toast('The phone was turned round. Keep it still while counting.');
       state.aspect = aspect;
       newCounter();
     }
+    // Only the area around the lines, already shrunk to the size the AI takes: much less to copy
+    // between threads and to read back from the graphics chip than a whole camera frame.
+    const size = TC.models[state.model].size;
+    const [rx, ry, rw, rh] = state.roi;
+    const sx = Math.round(rx * W);
+    const sy = Math.round(ry * H);
+    const sw = Math.max(1, Math.round(rw * W));
+    const sh = Math.max(1, Math.round(rh * H));
+    const scale = Math.min(size / sw, size / sh);
+    let bmp;
+    try {
+      bmp = await createImageBitmap(cam, sx, sy, sw, sh, { resizeWidth: Math.max(1, Math.round(sw * scale)), resizeHeight: Math.max(1, Math.round(sh * scale)), resizeQuality: 'medium' });
+    } catch (_) { await sleep(60); continue; }
+    const t2 = performance.now();
     let res;
     try {
-      res = await engine.detect(bmp, { key: state.model, roi: state.roi, conf: SENS[settings.sensitivity] || 0.3 });
+      res = await engine.detect(bmp, { key: state.model, crop: [sx, sy, sw, sh], frame: [W, H], conf: SENS[settings.sensitivity] || 0.3 });
     } catch (err) {
       if (!/^RESTART/.test(err.message)) { state.lastError = err.message; await sleep(400); }
       continue;
     }
     if (!state.camera || id !== state.loop) break;
+    const t3 = performance.now();
     state.frames++;
     state.lastDets = res.dets;
     const out = counter.update(res.dets, t);
@@ -223,22 +250,34 @@ async function loop(id) {
     if (out.tracks.some((tr) => performance.now() - tr.lastT < 400 && Math.hypot(tr.vx, tr.vy * state.aspect) > 0.00003)) state.lastMove = t;
     state.idle = t - state.lastMove > IDLE_AFTER;
     const spent = performance.now() - t0;
+    // Where each frame's time goes, for the status readout and the browser tests.
+    state.stages.push({ wait: t1 - t0, grab: t2 - t1, ai: t3 - t2, prep: res.ms.prep, infer: res.ms.infer, post: res.ms.post, main: performance.now() - t3, total: spent });
+    if (state.stages.length > 60) state.stages.shift();
     state.ms.push(res.ms.total);
     if (state.ms.length > 40) state.ms.shift();
     state.fpsT.push(performance.now());
     while (state.fpsT.length && performance.now() - state.fpsT[0] > 5000) state.fpsT.shift();
     maybeLighterModel();
     renderLive();
-    const gap = state.idle ? IDLE_MS : ACTIVE_MS;
+    const pace = PACE[settings.pace] || PACE.fast;
+    const gap = state.idle ? pace.idle : pace.active;
     if (spent < gap) await sleep(gap - spent);
   }
+}
+
+/** Median time of each step of recent frames (ms), and frames a second: for the status readout. */
+function stageMedians() {
+  const s = state.stages;
+  if (s.length < 5) return null;
+  const med = (k) => { const v = s.map((x) => x[k]).sort((a, b) => a - b); return Math.round(v[v.length >> 1]); };
+  return { wait: med('wait'), grab: med('grab'), prep: med('prep'), infer: med('infer'), total: med('total'), fps: (state.fpsT.length / 5).toFixed(1) };
 }
 
 /** Auto: a phone that can't keep up with the standard model (hot, or just slow) moves to the light one. */
 function maybeLighterModel() {
   if (settings.model !== 'auto' || state.model !== 'tiny' || state.switching || state.ms.length < 40) return;
   const sorted = [...state.ms].sort((a, b) => a - b);
-  if (sorted[20] < 280) return;
+  if (sorted[20] < TINY_MAX_MS * 1.5) return;
   state.switching = true;
   engine.load('nano').then(() => { state.model = 'nano'; state.ms = []; readyStatus(); toast('Switched to the light model to keep up'); })
     .catch(() => {}).finally(() => { state.switching = false; });
@@ -451,7 +490,10 @@ function drawOverlay() {
     ctx.font = '600 12px Roboto, system-ui, sans-serif';
     for (const tr of counter.tracker.tracks) {
       if (now - tr.lastT > 500) continue;
-      const [x1, y1, x2, y2] = tr.box;
+      // Where it is now, not where the AI last saw it: moved on at its measured speed, so boxes glide
+      // with the picture between analysed frames (up to a third of a second ahead).
+      const ahead = Math.max(0, Math.min(330, now - tr.lastT));
+      const [x1, y1, x2, y2] = [tr.box[0] + tr.vx * ahead, tr.box[1] + tr.vy * ahead, tr.box[2] + tr.vx * ahead, tr.box[3] + tr.vy * ahead];
       const flash = state.flash.get(tr.id);
       const hot = flash && now - flash < 600;
       ctx.lineWidth = hot ? 3 : 1.5;
@@ -761,9 +803,9 @@ function bind() {
   $('#status').onclick = () => {
     if (state.error) { startEngine(); return; }
     const i = engine.info || {};
-    const sorted = [...state.ms].sort((a, b) => a - b);
-    const med = sorted.length ? sorted[sorted.length >> 1] : null;
-    toast(`${state.model ? TC.models[state.model].label : 'No'} model · ${i.threads || 1} core${i.threads > 1 ? 's' : ''}${med != null ? ` · ${med} ms a frame` : ''}`);
+    const m = stageMedians();
+    toast(`${state.model ? TC.models[state.model].label : 'No'} model · ${i.threads || 1} core${i.threads > 1 ? 's' : ''}`
+      + (m ? ` · ${m.fps} fps · a frame takes ${m.total} ms: AI ${m.infer}, picture ${m.grab + m.prep}, waiting for the camera ${m.wait}` : ''), { ms: 8000 });
   };
   $('#backdrop').onclick = closeSheets;
   $('#sheetSettings').addEventListener('click', (e) => {

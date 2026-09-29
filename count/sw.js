@@ -60,7 +60,11 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(isolate(cacheFirst(SHELL_CACHE, req, event, true)));
   } else if (url.pathname.startsWith(SCOPE.pathname)) {
     const rel = url.pathname.slice(SCOPE.pathname.length);
-    if (rel.startsWith('models/') && rel.endsWith('.onnx')) event.respondWith(isolate(cacheFirst(MODEL_CACHE, req, event)));
+    // The runtime is loaded from count/ort/ so that everything it starts, including the worker
+    // threads it creates from its .mjs file, stays inside this worker's scope and is served with the
+    // isolation headers (the site's own /ort/ is outside it, and GitHub Pages sends none).
+    if (rel.startsWith('ort/')) event.respondWith(isolate(ortFile(rel.slice(4), event)));
+    else if (rel.startsWith('models/') && rel.endsWith('.onnx')) event.respondWith(isolate(cacheFirst(MODEL_CACHE, req, event)));
     else if (req.mode === 'navigate') event.respondWith(isolate(appPage(req)));
     else event.respondWith(isolate(cacheFirst(SHELL_CACHE, req, event, true)));
   }
