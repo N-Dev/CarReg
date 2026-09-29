@@ -1,7 +1,7 @@
 /* PlateSight configuration: the single source of truth for versions and model files.
  * A plain script (not a module) so the page, the service worker (importScripts), the publish
- * workflow and the tests can all read it. The publish workflow replaces `app: 'dev'` with the
- * commit id, which is what makes installed phones pick up each new version.
+ * workflow and the tests can all read it. The publish workflow stamps the commit id into `app`,
+ * which is what makes installed phones pick up each new version.
  * Model `rev` values are the first 12 hex digits of each file's SHA-256 (checked by the unit tests),
  * so replacing a model file automatically refreshes the copy cached on phones.
  */

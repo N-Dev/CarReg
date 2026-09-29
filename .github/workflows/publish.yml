@@ -124,9 +124,9 @@ jobs:
         run: |
           set -euo pipefail
           BUILD="${GITHUB_SHA::7}"
-          sed -i "s/app: 'dev'/app: '${BUILD}'/" js/config.js
+          sed -i "s/^  app: 'dev',/  app: '${BUILD}',/" js/config.js
           sed -i "s|^// build: dev$|// build: ${BUILD}|" sw.js
-          grep -q "app: '${BUILD}'" js/config.js
+          grep -q "^  app: '${BUILD}'," js/config.js
           grep -q "^// build: ${BUILD}$" sw.js
           echo "Build ${BUILD}"
 
