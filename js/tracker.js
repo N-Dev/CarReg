@@ -61,7 +61,10 @@ export function vote(reads, format = 'auto', minConf = 0.35) {
 
   const items = good
     // Reads of a plate cut off by the frame edge count for much less.
-    .map((r) => { const v = validate(r.text, profile); return { v, p: r.conf, w: r.conf * (v.valid ? 1.6 : 0.6) * (r.partial ? 0.3 : 1) }; })
+    .map((r) => {
+      const v = validate(r.text, profile);
+      return { v, p: r.conf, w: r.conf * (v.valid ? 1.6 : 0.6) * (r.partial ? 0.3 : 1) * (r.weight ?? 1) };
+    })
     .filter((x) => x.v.key);
   if (!items.length) return null;
 
@@ -125,6 +128,27 @@ export function iou(a, b) {
 
 const closeBitmap = (b) => { if (b && b.close) b.close(); };
 
+/** Keeps the highest-scoring image per reading key (at most 6 keys; evicted images are closed). */
+function keepBest(map, key, bmp, score, read = null) {
+  const cur = map.get(key);
+  if (cur && score <= cur.score) { closeBitmap(bmp); return; }
+  if (cur) closeBitmap(cur.bmp);
+  map.set(key, { bmp, score, read });
+  if (map.size > 6) {
+    let worst = null;
+    for (const [k, v] of map) if (!worst || v.score < worst[1].score) worst = [k, v];
+    closeBitmap(worst[1].bmp);
+    map.delete(worst[0]);
+  }
+}
+
+/** Best entry whose reading matches `key` (same plate, allowing OCR slips), or null. */
+function bestFor(map, key) {
+  let best = null;
+  for (const [k, v] of map) if (k && similar(k, key) && (!best || v.score > best.score)) best = v;
+  return best;
+}
+
 export class Track {
   constructor(id, det, now, opts) {
     this.id = id;
@@ -138,7 +162,12 @@ export class Track {
     this.result = null;
     this.confirmed = false;
     this.ended = false;
-    this.thumbs = new Map(); // plate text read in that frame -> { bmp, score }: best crop per reading
+    this.endReason = null;   // 'displaced' | 'timeout' | 'flush' (for the debug log)
+    // Best image per distinct reading (plate text read in that frame -> { bmp, score }), so the photo
+    // shown always matches the text shown. thumbs: padded photo; crops/inputs: debug-mode extras.
+    this.thumbs = new Map();
+    this.crops = new Map();
+    this.inputs = new Map();
     this.observe(det, now, opts, true);
   }
 
@@ -171,34 +200,25 @@ export class Track {
       if (this.reads.length > opts.maxReads) this.reads.shift();
       this.recompute(opts.format);
     }
-    if (det.thumb) {
-      // Keep the best crop for each distinct reading, so the photo shown always matches the text shown.
-      const key = det.read && det.read.text ? clean(det.read.text) : '';
-      const s = det.score * area(det.box) * ((det.read && det.read.conf) || 0.3);
-      const cur = this.thumbs.get(key);
-      if (!cur || s > cur.score) {
-        if (cur) closeBitmap(cur.bmp);
-        this.thumbs.set(key, { bmp: det.thumb, score: s });
-        if (this.thumbs.size > 6) {
-          let worst = null;
-          for (const [k, v] of this.thumbs) if (!worst || v.score < worst[1].score) worst = [k, v];
-          closeBitmap(worst[1].bmp);
-          this.thumbs.delete(worst[0]);
-        }
-      } else closeBitmap(det.thumb);
-    }
+    const key = det.read && det.read.text ? clean(det.read.text) : '';
+    const s = det.score * area(det.box) * ((det.read && det.read.conf) || 0.3);
+    if (det.thumb) keepBest(this.thumbs, key, det.thumb, s);
+    if (det.crop) keepBest(this.crops, key, det.crop, s, det.read);
+    if (det.ocrInput) keepBest(this.inputs, key, det.ocrInput, s, det.read);
   }
 
-  /** Best crop whose reading matches `key` (the plate shown), or null. */
-  thumbFor(key) {
-    let best = null;
-    for (const [k, v] of this.thumbs) if (k && similar(k, key) && (!best || v.score > best.score)) best = v;
-    return best;
-  }
+  /** Best photo whose reading matches `key` (the plate shown), or null. */
+  thumbFor(key) { return bestFor(this.thumbs, key); }
+
+  /** Debug mode: tight crop / exact reader input (with that frame's read) matching `key`, or null. */
+  cropFor(key) { return bestFor(this.crops, key); }
+  inputFor(key) { return bestFor(this.inputs, key); }
 
   closeThumbs() {
-    for (const v of this.thumbs.values()) closeBitmap(v.bmp);
-    this.thumbs.clear();
+    for (const m of [this.thumbs, this.crops, this.inputs]) {
+      for (const v of m.values()) closeBitmap(v.bmp);
+      m.clear();
+    }
   }
 
   recompute(format) { this.result = vote(this.reads, format); }
@@ -210,13 +230,14 @@ export class Track {
     const r = this.result;
     if (!r || r.n < opts.minReads || r.conf < opts.minAgree) return false;
     if (this.fullReads() < opts.minReads) return false; // never confirm a plate only ever seen cut off
+    if (opts.minScore && r.conf * r.prob < opts.minScore) return false; // threshold tuned from field tests
     return r.valid || (r.n >= 4 && r.conf >= 0.8 && r.prob >= 0.85);
   }
 }
 
 export class Tracker {
   constructor(opts = {}) {
-    this.opts = { iou: 0.15, maxAge: 1200, maxReads: 24, format: 'auto', minReads: 2, minAgree: 0.6, ...opts };
+    this.opts = { iou: 0.15, maxAge: 1200, maxReads: 24, format: 'auto', minReads: 2, minAgree: 0.6, minScore: 0, ...opts };
     this.tracks = [];
     this.nextId = 1;
   }
@@ -254,7 +275,9 @@ export class Tracker {
       usedT.add(j);
       this.tracks[j].observe(dets[i], now, this.opts);
     }
-    for (const j of displaced) if (!usedT.has(j)) this.tracks[j].ended = true;
+    for (const j of displaced) {
+      if (!usedT.has(j)) { this.tracks[j].ended = true; this.tracks[j].endReason = 'displaced'; }
+    }
     dets.forEach((d, i) => {
       if (!usedD.has(i)) this.tracks.push(new Track(this.nextId++, d, now, this.opts));
     });
@@ -264,7 +287,8 @@ export class Tracker {
     const keep = [];
     for (const t of this.tracks) {
       if (!t.confirmed && t.confirmable(this.opts)) { t.confirmed = true; confirmed.push(t); }
-      (t.ended || now - t.last > this.opts.maxAge ? lost : keep).push(t);
+      if (!t.ended && now - t.last > this.opts.maxAge) { t.ended = true; t.endReason = 'timeout'; }
+      (t.ended ? lost : keep).push(t);
     }
     this.tracks = keep;
     return { confirmed, lost };
@@ -274,7 +298,11 @@ export class Tracker {
   flush() {
     const all = this.tracks;
     this.tracks = [];
-    for (const t of all) if (!t.confirmed && t.confirmable(this.opts)) t.confirmed = true;
+    for (const t of all) {
+      if (!t.confirmed && t.confirmable(this.opts)) t.confirmed = true;
+      t.ended = true;
+      t.endReason = 'flush';
+    }
     return all;
   }
 }

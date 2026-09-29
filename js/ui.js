@@ -25,6 +25,19 @@ const P = {
   chevron: '<path d="m9 18 6-6-6-6"/>',
   stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
   play: '<path d="M7 4v16l13-8z"/>',
+  bug: '<rect x="8" y="6" width="8" height="14" rx="4"/><path d="M12 20v-9M8 13H4M20 13h-4M9 7.5 7 5M15 7.5 17 5M8.5 17.5 5 20M15.5 17.5 19 20M8 9.5 4.5 8M16 9.5 19.5 8"/>',
+  gauge: '<path d="M12 14l4-4"/><path d="M3.3 19a10 10 0 1 1 17.4 0"/><circle cx="12" cy="14" r="1.5" fill="currentColor"/>',
+  list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  flask: '<path d="M9 3h6M10 3v6L4.5 18.5A2 2 0 0 0 6.2 21h11.6a2 2 0 0 0 1.7-2.5L14 9V3"/><path d="M7 15h10"/>',
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+  archive: '<rect x="2" y="4" width="20" height="5" rx="1"/><path d="M4 9v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9M10 13h4"/>',
+  sparkle: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 17l.8 2.2L22 20l-2.2.8L19 23l-.8-2.2L16 20l2.2-.8z"/>',
+  info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
+  wrench: '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9l-3.8 3.8z"/>',
+  thermo: '<path d="M14 14.8V4a2 2 0 0 0-4 0v10.8a4 4 0 1 0 4 0z"/>',
+  target: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+  x: '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/>',
+  ok: '<circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/>',
 };
 
 export function icon(name, cls = '') {
@@ -124,14 +137,31 @@ export function closeSheet() {
   document.getElementById('backdrop').classList.remove('show');
 }
 
-/** Converts an ImageBitmap (or canvas) to a small JPEG data URL. */
-export function bitmapToDataURL(bmp, quality = 0.82) {
+/** Converts an ImageBitmap (or canvas) to a small JPEG (or PNG) data URL. */
+export function bitmapToDataURL(bmp, quality = 0.82, type = 'image/jpeg') {
   if (!bmp) return null;
   const c = document.createElement('canvas');
   c.width = bmp.width;
   c.height = bmp.height;
   c.getContext('2d').drawImage(bmp, 0, 0);
-  return c.toDataURL('image/jpeg', quality);
+  return c.toDataURL(type, quality);
+}
+
+/** data: URL -> Blob (for storing images in IndexedDB and zipping them). */
+export function dataURLToBlob(url) {
+  const [head, body] = url.split(',', 2);
+  const type = (head.match(/^data:([^;,]+)/) || [])[1] || 'application/octet-stream';
+  const bin = atob(body);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type });
+}
+
+/** Percent with one decimal below 10% (e.g. 4.2%), whole numbers above. */
+export function pct1(x) {
+  const v = (x || 0) * 100;
+  if (v > 0 && v < 0.05) return '<0.1%';
+  return `${v < 9.95 && v > 0 ? v.toFixed(1) : Math.round(v)}%`;
 }
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

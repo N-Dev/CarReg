@@ -1,16 +1,15 @@
-// Main-thread side of the AI engine: service worker setup, worker RPC and model loading.
+// Main-thread side of the AI engine: service worker setup, worker RPC, runtime and model loading.
 
-export const ORT_VERSION = '1.20.1';
+export const CFG = self.PS_CONFIG;
+export const ORT_VERSION = CFG.ort.version;
 export const ORT_CDN = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/`;
-
-export const MODELS = {
-  det384: { url: 'models/plate-detector-384.onnx', kind: 'det', size: 384, bytes: 7771218 },
-  det640: { url: 'models/plate-detector-640.onnx', kind: 'det', size: 640, bytes: 7835770 },
-  ocrFast: { url: 'models/plate-ocr-fast.onnx', kind: 'ocr', bytes: 3344276 },
-  ocrAcc: { url: 'models/plate-ocr-accurate.onnx', kind: 'ocr', bytes: 5262214 },
-};
-
 const APP_BASE = new URL('../', import.meta.url).href;
+
+/** Model table from config.js, with cache-busting revision URLs. */
+export const MODELS = Object.fromEntries(Object.entries(CFG.models).map(([k, m]) => [k, { ...m, url: `${m.file}?v=${m.rev}` }]));
+
+/** Absolute URL of a model file (as requested by the worker, so the service worker caches it under the same key). */
+export const modelUrl = (key) => new URL(MODELS[key].url, APP_BASE).href;
 
 /**
  * Registers the service worker. On the very first visit the page reloads once so it runs
@@ -51,10 +50,12 @@ export class Engine extends EventTarget {
     this.pending = new Map();
     this.loads = new Map();
     this.ready = new Set();
+    this.timings = {};
     this.info = null;
   }
 
   _rpc(cmd, args = {}, transfer = [], onProgress = null) {
+    if (!this.worker) return Promise.reject(new Error('RESTART: engine not running'));
     return new Promise((resolve, reject) => {
       const id = ++this.seq;
       this.pending.set(id, { resolve, reject, onProgress });
@@ -72,14 +73,17 @@ export class Engine extends EventTarget {
     else p.reject(new Error(error));
   }
 
+  _progress(detail) { this.dispatchEvent(new CustomEvent('progress', { detail })); }
+
   /**
-   * Starts a fresh inference worker.
+   * Starts a fresh inference worker and downloads the runtime (progress key 'runtime').
    * prefer: 'site' (runtime copy published with the app) or 'cdn'; threads: 1 = single-core safe mode.
    */
   async boot({ gpu = false, threads = 1, prefer = 'site', safe = false } = {}) {
     this.terminate();
     const n = self.crossOriginIsolated === true ? Math.max(1, threads) : 1;
     const useGpu = !!gpu && 'gpu' in navigator;
+    const mode = useGpu ? CFG.ort.gpu : CFG.ort.cpu;
     this.worker = new Worker(new URL('./engine-worker.js', import.meta.url));
     this.worker.onmessage = (e) => this._onMessage(e);
     this.worker.onerror = (e) => {
@@ -91,13 +95,14 @@ export class Engine extends EventTarget {
     this.info = await this._rpc('init', {
       siteBase: new URL('ort/', APP_BASE).href,
       cdnBase: ORT_CDN,
-      file: useGpu ? 'ort.webgpu.min.js' : 'ort.min.js',
-      prefer,
+      ort: { script: mode.script, wasm: mode.wasm, wasmBytes: mode.wasmBytes, prefer },
       threads: n,
       gpu: useGpu,
       base: APP_BASE,
-    });
+    }, [], (p) => this._progress(p));
     this.info.safe = safe;
+    this.info.requestedThreads = threads;
+    this.timings.runtimeMs = this.info.runtimeMs;
     return this.info;
   }
 
@@ -122,12 +127,14 @@ export class Engine extends EventTarget {
     if (!this.loads.has(key)) {
       const m = MODELS[key];
       const job = this._rpc('load', {
-        key, url: new URL(m.url, APP_BASE).href, expected: m.bytes, kind: m.kind, size: m.size || 0,
-      }, [], (progress) => this.dispatchEvent(new CustomEvent('progress', { detail: progress })))
+        key, url: modelUrl(key), expected: m.bytes, kind: m.kind, size: m.size || 0,
+      }, [], (p) => this._progress(p))
         .then((r) => {
           this.ready.add(key);
-          if (r && r.ep) this.info.ep = r.ep;
-          if (r && r.gpuError) this.info.gpuError = r.gpuError;
+          if (r && r.ep && this.info) this.info.ep = r.ep;
+          if (r && r.gpuError && this.info) this.info.gpuError = r.gpuError;
+          if (r && !r.cached) this.timings[key] = { downloadMs: r.downloadMs, initMs: r.initMs };
+          this.dispatchEvent(new CustomEvent('loaded', { detail: { key, ...r } }));
           return r;
         })
         .catch((err) => { this.loads.delete(key); throw err; });
@@ -142,4 +149,7 @@ export class Engine extends EventTarget {
   analyze(bitmap, opts) {
     return this._rpc('analyze', { bitmap, ...opts }, [bitmap]);
   }
+
+  /** Times every loaded model. */
+  bench(runs = 15) { return this._rpc('bench', { runs }); }
 }

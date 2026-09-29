@@ -15,6 +15,7 @@ import onnxruntime as ort
 APP = sys.argv[1]
 ORT_DIR = os.environ.get("ORT_DIR")  # optional: serve real ONNX Runtime Web files at /ort/ (like the published site)
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 8765
+SLOW_BPS = int(os.environ.get("SLOW_KBPS", "1000")) * 1000  # throttled download speed (bytes/s) for ps_slow=1
 SESSIONS = {}
 LOG = {"loads": [], "runs": {}, "env": []}
 LOCK = threading.Lock()
@@ -40,6 +41,24 @@ class H(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _slow(self):
+        # Tests set the cookie ps_slow=1 to simulate a slow mobile connection for the AI downloads.
+        return "ps_slow=1" in (self.headers.get("Cookie") or "")
+
+    def _send_slow(self, body, ctype):
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        step = 32768
+        try:
+            for i in range(0, len(body), step):
+                self.wfile.write(body[i:i + step])
+                self.wfile.flush()
+                time.sleep(step / SLOW_BPS)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
     def do_GET(self):
         p = urlparse(self.path).path
         if ORT_DIR and p.startswith("/ort/"):
@@ -47,7 +66,15 @@ class H(SimpleHTTPRequestHandler):
             if not os.path.isfile(f):
                 return self._send(404, b"not found", "text/html")
             ctype = {"js": "application/javascript", "mjs": "application/javascript", "wasm": "application/wasm"}.get(f.rsplit(".", 1)[-1], "application/octet-stream")
+            if self._slow() and f.endswith(".wasm"):
+                return self._send_slow(open(f, "rb").read(), ctype)
+            if "ps_badwasm=1" in (self.headers.get("Cookie") or "") and f.endswith(".wasm"):
+                return self._send(200, b"\x7fbroken" * (os.path.getsize(f) // 7), ctype)  # a damaged copy
             return self._send(200, open(f, "rb").read(), ctype)
+        if self._slow() and p.endswith(".onnx"):
+            f = os.path.join(APP, p.lstrip("/"))
+            if os.path.isfile(f):
+                return self._send_slow(open(f, "rb").read(), "application/octet-stream")
         if p == "/__log":
             return self._send(200, json.dumps(LOG).encode(), "application/json")
         return super().do_GET()

@@ -1,7 +1,13 @@
-# Publishes the app to the gh-pages branch (served by GitHub Pages) on every push to main.
-# It adds a copy of ONNX Runtime Web under ort/, so phones load the AI runtime from this site
-# instead of depending on a third-party CDN.
-name: Publish site
+# Tests every push to main and publishes the app to the gh-pages branch (served by GitHub Pages)
+# only if every test passes.
+#   test     unit tests, then the end-to-end tests in Chromium emulating a Pixel 7 with a fake camera
+#            and the real ONNX Runtime Web (retried once, as browser timing can be flaky on shared runners).
+#            If they fail, logs and screenshots are pushed to the ci-logs branch for debugging.
+#   publish  adds ONNX Runtime Web under ort/ (so phones load the AI runtime from this site, not a CDN),
+#            stamps the build id into js/config.js and sw.js (which makes installed phones update) and
+#            pushes the result to gh-pages.
+# Versions and file sizes come from js/config.js, the single source of truth.
+name: Test and publish
 
 on:
   push:
@@ -16,26 +22,108 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Unit tests
+        run: node --test tests/*.test.mjs
+
+      - name: Get ONNX Runtime Web (version from js/config.js)
+        run: |
+          set -euo pipefail
+          VERSION=$(grep -oP "version: '\K[0-9.]+" js/config.js | head -1)
+          echo "ONNX Runtime Web ${VERSION}"
+          mkdir -p /tmp/ort
+          npm pack "onnxruntime-web@${VERSION}" --silent --pack-destination /tmp/ort
+          tar -xzf "/tmp/ort/onnxruntime-web-${VERSION}.tgz" -C /tmp/ort
+          node tools/check_runtime.mjs /tmp/ort/package/dist
+          echo "ORT_DIST=/tmp/ort/package/dist" >> "$GITHUB_ENV"
+
+      - name: Install browser test tools
+        run: |
+          set -euo pipefail
+          command -v ffmpeg >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg; }
+          pip install -q playwright onnxruntime numpy pillow
+          python -m playwright install --with-deps chromium
+
+      - name: End-to-end tests (real AI runtime, emulated Pixel 7)
+        run: |
+          set -o pipefail
+          cd tests/e2e
+          if REAL_ORT="$ORT_DIST" python run_e2e.py 2>&1 | tee /tmp/e2e-1.log; then exit 0; fi
+          echo "::warning::End-to-end tests failed once; retrying"
+          REAL_ORT="$ORT_DIST" python run_e2e.py 2>&1 | tee /tmp/e2e-2.log
+
+      - name: Save logs to the ci-logs branch
+        if: failure()
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          set -x
+          mkdir -p /tmp/ci-logs
+          cp /tmp/e2e-*.log /tmp/ci-logs/ 2>/dev/null || true
+          cp -r tests/e2e/.work/shots /tmp/ci-logs/ 2>/dev/null || true
+          echo "${GITHUB_SHA} run ${GITHUB_RUN_ID}" > /tmp/ci-logs/COMMIT
+          cd /tmp/ci-logs
+          git init -q -b ci-logs
+          git add -A
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -q -m "CI logs for ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ci-logs
+
+      - name: Keep screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots
+          path: tests/e2e/.work/shots
+          if-no-files-found: ignore
+
   publish:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Add ONNX Runtime Web (version pinned in sw.js)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Add ONNX Runtime Web (version from js/config.js)
         run: |
           set -euo pipefail
-          VERSION=$(grep -oP "ORT_VERSION = '\K[0-9.]+" sw.js)
+          VERSION=$(grep -oP "version: '\K[0-9.]+" js/config.js | head -1)
           echo "ONNX Runtime Web ${VERSION}"
           npm pack "onnxruntime-web@${VERSION}" --silent
           tar -xzf "onnxruntime-web-${VERSION}.tgz"
+          node tools/check_runtime.mjs package/dist
           mkdir -p ort
-          for f in ort.min.js ort.webgpu.min.js \
-                   ort-wasm-simd-threaded.mjs ort-wasm-simd-threaded.wasm \
-                   ort-wasm-simd-threaded.jsep.mjs ort-wasm-simd-threaded.jsep.wasm; do
+          for f in $(grep -oP "(script|wasm): '\K[\w.-]+" js/config.js); do
             cp "package/dist/$f" ort/
+            case "$f" in *.wasm) cp "package/dist/${f%.wasm}.mjs" ort/ ;; esac
           done
           rm -rf package "onnxruntime-web-${VERSION}.tgz"
           ls -la ort
+
+      - name: Stamp the build id
+        run: |
+          set -euo pipefail
+          BUILD="${GITHUB_SHA::7}"
+          sed -i "s/app: 'dev'/app: '${BUILD}'/" js/config.js
+          sed -i "s|^// build: dev$|// build: ${BUILD}|" sw.js
+          grep -q "app: '${BUILD}'" js/config.js
+          grep -q "^// build: ${BUILD}$" sw.js
+          echo "Build ${BUILD}"
 
       - name: Publish to gh-pages
         run: |
@@ -43,6 +131,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout --orphan publish
+          rm -rf tests   # test photos and scripts aren’t part of the app
           git add -A
           git commit -q -m "Publish ${GITHUB_SHA::7} with ONNX Runtime Web"
           git push -f origin publish:gh-pages

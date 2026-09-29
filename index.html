@@ -16,8 +16,9 @@
 <div class="app" id="app" data-mode="scan">
 
   <header class="topbar">
-    <div class="brand"><span class="brand__mark" aria-hidden="true"></span><span>PlateSight</span></div>
+    <div class="brand" id="brand"><span class="brand__mark" aria-hidden="true"></span><span>PlateSight</span></div>
     <button class="status" id="status" type="button" aria-live="polite"><i class="dot"></i><span id="statusText">Starting…</span></button>
+    <button class="icon-btn icon-btn--debug" id="btnDebug" type="button" aria-label="Debug panel" hidden></button>
     <button class="icon-btn" id="btnSettings" type="button" aria-label="Settings"></button>
   </header>
 
@@ -28,7 +29,7 @@
         <video id="cam" playsinline muted autoplay></video>
         <canvas id="camOverlay" class="overlay"></canvas>
         <div class="reticle" id="reticle" hidden><i></i><i></i><i></i><i></i><p>Point at a number plate</p></div>
-        <div class="hud" id="hud" hidden></div>
+        <div class="hud" id="hud" hidden><div id="hudText"></div><canvas id="hudGraph" aria-hidden="true"></canvas></div>
         <div class="cam-empty" id="camEmpty">
           <div class="hero-icon" id="camHeroIcon"></div>
           <h2>Live plate scanning</h2>
@@ -144,6 +145,24 @@
     <div class="settings" id="settingsBody"></div>
   </section>
 
+  <section class="sheet sheet--tall" id="sheetDebug" aria-hidden="true" role="dialog" aria-label="Debug panel">
+    <div class="sheet__grip"></div>
+    <div class="sheet__title"><h2>Debug</h2><button class="icon-btn" data-close type="button" aria-label="Close"></button></div>
+    <div class="dtabs" id="debugTabs">
+      <button type="button" data-tab="overview" class="on">Overview</button>
+      <button type="button" data-tab="log">Log</button>
+      <button type="button" data-tab="tools">Tools</button>
+      <button type="button" data-tab="accuracy">Accuracy</button>
+    </div>
+    <div class="dbody" id="debugBody"></div>
+  </section>
+
+  <section class="sheet" id="sheetNew" aria-hidden="true" role="dialog" aria-label="What’s new">
+    <div class="sheet__grip"></div>
+    <div class="sheet__title"><h2>What’s new</h2><button class="icon-btn" data-close type="button" aria-label="Close"></button></div>
+    <div id="newBody"></div>
+  </section>
+
   <div class="toast" id="toast" role="status"></div>
 
   <div class="boot" id="boot" hidden>
@@ -152,6 +171,7 @@
       <h2 id="bootTitle">Setting up PlateSight</h2>
       <p id="bootText">Downloading the on-device AI. This happens once, and nothing you scan ever leaves your phone.</p>
       <div class="progress progress--lg"><div id="bootBar"></div></div>
+      <ul class="boot__parts" id="bootParts" hidden></ul>
       <p class="boot__meta" id="bootMeta">&nbsp;</p>
       <button class="btn btn--primary" id="bootRetry" type="button" hidden>Try again</button>
     </div>
@@ -162,6 +182,7 @@
 <input type="file" id="filePhoto" accept="image/*" hidden>
 <input type="file" id="fileVideoCam" accept="video/*" capture="environment" hidden>
 <input type="file" id="fileVideo" accept="video/*" hidden>
+<script src="js/config.js"></script>
 <script type="module" src="js/main.js"></script>
 </body>
 </html>
