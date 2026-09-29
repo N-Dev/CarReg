@@ -502,6 +502,7 @@ b.hl { color: var(--mint); }
 .dtable { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .dtable th { text-align: left; color: var(--muted); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--line-2); }
 .dtable td { padding: 7px 8px; border-bottom: 1px solid var(--line); }
+.dtable td small { display: block; color: var(--muted); font-size: 11px; }
 .dtable tr.best td { color: var(--mint); }
 .dnote { color: var(--muted); font-size: 12.5px; margin: 6px 2px 10px; }
 .dnote b { color: var(--text); }

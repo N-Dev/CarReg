@@ -9,9 +9,11 @@ Sections:
   main      first launch, live scan, photo, video, history, settings, share target, offline
   cars      moving the camera from one car to the next (no mixed-up plates or photos)
   debug     developer easter egg, live debug overlay, read inspector, field test, debug panel,
-            benchmark, accuracy stats, training-set export, quality override, history privacy
+            benchmark, diagnostics speed summary, accuracy stats, training-set export, quality
+            override, history privacy
   slow      slow first launch (no false "hang", no safe mode) and an update arriving mid-download
   upgrade   a phone upgrading from 1.0: downloaded models carry over, "What's new" once
+  datasaver Data Saver: Auto never downloads the sharper models, but uses them once on the phone
   fallback  a damaged copy of the AI runtime on the site (real runtime only)
   gpu       GPU mode on WebGPU (real runtime only; Chromium's software WebGPU adapter)
 Run a subset with SECTIONS=debug,slow.
@@ -60,7 +62,7 @@ PORT = 8765
 BASE = f"http://127.0.0.1:{PORT}/"
 MOCK = open(f"{H}/mock-ort.js").read()
 REAL_ORT = os.environ.get("REAL_ORT")
-SECTIONS = [s for s in os.environ.get("SECTIONS", "main,cars,debug,slow,upgrade,fallback,gpu").split(",") if s]
+SECTIONS = [s for s in os.environ.get("SECTIONS", "main,cars,debug,slow,upgrade,datasaver,fallback,gpu").split(",") if s]
 results = {}
 logs = []
 cdn_hits = []
@@ -292,6 +294,8 @@ def section_cars(p, dev):
 def section_debug(p, dev):
     browser = launch(p)
     ctx, page = new_page(browser, dev)
+    # For "Copy diagnostics". Granting for this origin replaces its permissions, so camera is listed again.
+    ctx.grant_permissions(["camera", "clipboard-read", "clipboard-write"], origin=BASE.rstrip("/"))
     page.goto(BASE)
     page.wait_for_function(READY, timeout=120000)
     page.wait_for_function("() => window.__plateSight.scan.running", timeout=30000)
@@ -365,6 +369,27 @@ def section_debug(p, dev):
     tools = page.inner_text("#debugBody")
     check("debug tools: model benchmark", "Plate finder 384" in tools and "Reader (fast)" in tools and "Median" in tools, tools[:160].replace("\n", " | "))
     page.screenshot(path=f"{SHOTS}/25_debug_tools.png")
+
+    # ---------------------------------------------------------------- copy diagnostics: speed per quality tier, benchmark
+    page.click("#debugTabs [data-tab=overview]")
+    page.wait_for_selector("#dbgSpeed .dtable td", timeout=20000)
+    page.click("[data-dact=copy]")
+    page.wait_for_function("() => /copied|copy/i.test(document.querySelector('#toast').textContent)", timeout=10000)
+    toast = page.inner_text("#toast")
+    try:
+        text = page.evaluate("() => navigator.clipboard.readText()")
+        d = json.loads(text[text.index("{"):text.index("\n\nLog (last")])
+    except Exception as e:
+        text, d = repr(e), {}
+    sp = d.get("speed") or {}
+    tiers = [r for setup in (sp.get("setups") or {}).values() for r in setup.values()]
+    bench = ((d.get("benchmarks") or {}).get("models") or {}).get("results") or []
+    check("diagnostics: speed per quality tier and the benchmark are copied",
+          "copied" in toast and sp.get("frames", 0) > 3 and sp.get("timeline") and any("active" in r or "idle" in r for r in tiers)
+          and any(r.get("finder") for r in tiers) and any(b.get("key") == "det384" for b in bench),
+          f"{toast!r} speed={json.dumps(sp)[:300]} bench={json.dumps(bench)[:120]} {text[:80]!r}")
+    page.locator("#dbgSpeed").screenshot(path=f"{SHOTS}/25b_debug_speed.png")
+
     page.click("#debugTabs [data-tab=accuracy]")
     page.wait_for_selector(".dstats", timeout=10000)
     acc = page.inner_text("#debugBody")
@@ -532,6 +557,54 @@ def section_upgrade(p, dev):
     check("upgrading from 1.0: downloaded models carry over, no re-download", not downloads and "ps-models-v1" not in caches and "ps-models" in caches and not boot_shown,
           f"copied={copied} downloads={downloads} caches={caches}")
     check("upgrading from 1.0: what's new is shown", news)
+    browser.close()
+
+
+# ==================================================================== Data Saver
+SAVE_DATA = "try { Object.defineProperty(NetworkInformation.prototype, 'saveData', { get: () => true, configurable: true }); } catch (e) {}"
+# Every frame counts as quick, so Auto wants a sharper tier as soon as it's allowed to step up. Headless
+# Chromium reports critical CPU pressure, which holds the quality, so the phone is made to look cool too.
+ROOMY = "() => { const s = window.__plateSight.scan; s.adaptive.budget = 1e6; s.simPressure = 'nominal'; }"
+TIER = "() => ({ tier: window.__plateSight.scan.adaptive.tier, det: window.__plateSight.scan.last && window.__plateSight.scan.last.det, loaded: [...window.__plateSight.engine.ready] })"
+
+
+def section_datasaver(p, dev):
+    """Data Saver: Auto never downloads the sharper models itself, but uses them once they're on the phone."""
+    browser = launch(p)
+    ctx, page = new_page(browser, dev)
+    ctx.add_init_script(SAVE_DATA)
+    downloads = []
+    ctx.route("**/*.onnx*", lambda route: (downloads.append(route.request.url.rsplit("/", 1)[-1]), route.continue_()))
+    page.goto(BASE)
+    page.wait_for_function(READY, timeout=120000)
+    page.wait_for_function("() => window.__plateSight.scan.running", timeout=30000)
+    page.evaluate(ROOMY)
+    page.wait_for_timeout(9000)
+    r = page.evaluate(TIER)
+    msgs = page.evaluate("() => window.__plateSight.logEntries().map(e => e.msg)")
+    sharper = [u for u in downloads if "detector-640" in u or "ocr-accurate" in u]
+    check("Data Saver: Auto doesn't download the sharper models", page.evaluate("() => navigator.connection.saveData") and r["tier"] == "fast"
+          and not sharper and any("Data Saver is on" in m for m in msgs), f"{json.dumps(r)} downloads={downloads}")
+    # The sharper models reach the phone another way (Photo mode, Download all models); then the app is reopened.
+    page.evaluate("() => Promise.all(['det640', 'ocrAcc'].map(k => window.__plateSight.engine.load(k)))")
+    for _ in range(100):
+        if page.evaluate("async () => (await (await caches.open('ps-models')).keys()).length") >= 4:
+            break
+        page.wait_for_timeout(100)
+    downloads.clear()
+    page.reload()
+    page.wait_for_function(READY, timeout=120000)
+    page.wait_for_function("() => window.__plateSight.scan.running", timeout=30000)
+    page.evaluate(ROOMY)
+    try:
+        page.wait_for_function("() => { const s = window.__plateSight.scan; return s.adaptive.tier === 'sharp' && s.last && s.last.det === 'det640'; }", timeout=120000)
+        ok = True
+    except Exception:
+        ok = False
+    r = page.evaluate(TIER)
+    msgs = page.evaluate("() => window.__plateSight.logEntries().map(e => e.msg)")
+    check("Data Saver: Auto steps up to models already on the phone, without downloading", ok and not downloads and any("already on the phone" in m for m in msgs),
+          f"{json.dumps(r)} downloads={downloads}")
     browser.close()
 
 

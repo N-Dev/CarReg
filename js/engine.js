@@ -11,6 +11,18 @@ export const MODELS = Object.fromEntries(Object.entries(CFG.models).map(([k, m])
 /** Absolute URL of a model file (as requested by the worker, so the service worker caches it under the same key). */
 export const modelUrl = (key) => new URL(MODELS[key].url, APP_BASE).href;
 
+/** Where the service worker keeps downloaded models (MODEL_CACHE in sw.js). */
+export const MODEL_CACHE = 'ps-models';
+
+/** Whether a model is already on this phone, so loading it needs no download. */
+export async function modelCached(key) {
+  try {
+    return !!(await caches.match(modelUrl(key), { cacheName: MODEL_CACHE }));
+  } catch (_) {
+    return false;
+  }
+}
+
 /**
  * Registers the service worker. On the very first visit the page reloads once so it runs
  * under the worker's cross-origin isolation headers (needed for multi-threaded inference).

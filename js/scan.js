@@ -3,7 +3,9 @@
 // hot), and while no plate is in view it analyses fewer frames to save battery and heat.
 import { Tracker, iou } from './tracker.js';
 import { SENS } from './store.js';
-import { TIERS, Adaptive, Idle } from './adaptive.js';
+import { TIERS, Adaptive, Idle, mayLoad } from './adaptive.js';
+import { SpeedLog } from './speedlog.js';
+import { modelCached } from './engine.js';
 import { flagFor } from './formats.js';
 import { $, $$, settings, engine, state, on, emit, log, haptic, blip, score, savePlate } from './ctx.js';
 import { Board, closeDet } from './board.js';
@@ -19,12 +21,15 @@ export const scan = {
   fps: 0, lastT: 0, ms: null, wake: null, torch: false, zoom: 1, board: new Board({ max: 120 }), resume: false,
   adaptive: new Adaptive({ mode: settings.quality }), idle: new Idle(), isIdle: false,
   pressure: null, simPressure: null, perf: [], frames: 0, last: null, fetching: false, wantFailedAt: -1e9,
+  saveDataCheckAt: -1e9, speed: new SpeedLog(),
 };
 
 /** Detection threshold: the sensitivity setting, unless overridden in debug mode. */
 export const detConf = () => settings.dbgConf || SENS[settings.sensitivity];
 const pressureNow = () => scan.simPressure || scan.pressure;
 const tierReady = (name) => { const t = TIERS[name]; return [t.det, t.read, t.readNew].every((k) => engine.has(k)); };
+/** The engine a frame ran on, so speed figures for the CPU (per thread count) and the GPU stay apart. */
+const setupKey = () => { const i = engine.info || {}; return i.ep === 'webgpu' ? 'gpu' : `cpu-${i.threads || 1}t`; };
 let el = null;
 
 const toDet = (d) => ({
@@ -216,6 +221,7 @@ async function liveLoop(id) {
     let bmp;
     try { bmp = await createImageBitmap(cam); } catch (_) { await sleep(80); continue; }
     const plan = framePlan();
+    const tierUsed = scan.adaptive.tier;
     const conf = detConf();
     let res;
     try {
@@ -229,6 +235,7 @@ async function liveLoop(id) {
     }
     if (!scan.running || id !== scan.loop) { res.dets.forEach(closeDet); break; }
     const now = performance.now();
+    const platesRead = res.dets.reduce((n, d) => n + (d.reads ? 1 : 0), 0);
     scan.frames++;
     scan.frameW = res.w;
     scan.frameH = res.h;
@@ -254,6 +261,10 @@ async function liveLoop(id) {
     if (step.want) wantTier(step.want);
     scan.perf.push({ t: now, ms: res.ms.total, det: res.ms.det, ocr: res.ms.ocr, tier: scan.adaptive.tier, idle, n: res.dets.length });
     if (scan.perf.length > PERF_KEEP) scan.perf.shift();
+    scan.speed.add({
+      t: now, total: res.ms.total, finder: res.ms.det, reader: res.ms.ocr, det: res.det, ocr: res.ocr,
+      tier: tierUsed, idle, plates: platesRead, setup: setupKey(),
+    });
     updateHud();
     const gap = idle ? scan.idle.frameMs : FRAME_MS;
     const spent = performance.now() - t0;
@@ -261,23 +272,36 @@ async function liveLoop(id) {
   }
 }
 
-/** Loads the models a better quality tier needs, in the background (not on Data Saver unless asked). */
-function wantTier(name, force = false) {
+/**
+ * Loads the models a better quality tier needs, in the background. On Data Saver only models already
+ * on the phone are loaded (from its cache, so no data is used); a quality fixed in settings always loads.
+ */
+async function wantTier(name, force = false) {
   const t = TIERS[name];
   if (!t || scan.fetching || !state.ready) return;
   const keys = [...new Set([t.det, t.read, t.readNew])].filter((k) => !engine.has(k));
   if (!keys.length) return;
   const now = performance.now();
   if (!force && now - scan.wantFailedAt < 60000) return;
-  if (!force && navigator.connection && navigator.connection.saveData) {
-    if (!scan.saveDataNoted) { scan.saveDataNoted = true; log('perf', 'Data Saver is on, so sharper models aren’t downloaded automatically'); }
-    return;
-  }
+  const saveData = !!(navigator.connection && navigator.connection.saveData);
+  // On Data Saver, look in the phone's cache at most once a minute while something is still missing.
+  if (!force && saveData && now - scan.saveDataCheckAt < 60000) return;
   scan.fetching = true;
-  log('engine', `Fetching ${keys.join(' + ')} for ${t.label} quality`);
-  Promise.all(keys.map((k) => engine.load(k)))
-    .catch((err) => { scan.wantFailedAt = performance.now(); log('error', `Couldn’t load ${keys.join(', ')}: ${err.message}`); })
-    .finally(() => { scan.fetching = false; });
+  try {
+    const cached = saveData && !force ? await Promise.all(keys.map(modelCached)) : [];
+    if (!mayLoad({ saveData, force, cached })) {
+      scan.saveDataCheckAt = performance.now();
+      if (!scan.saveDataNoted) { scan.saveDataNoted = true; log('perf', 'Data Saver is on, so sharper models aren’t downloaded automatically'); }
+      return;
+    }
+    log('engine', cached.length ? `Loading ${keys.join(' + ')} for ${t.label} quality (already on the phone)` : `Fetching ${keys.join(' + ')} for ${t.label} quality`);
+    await Promise.all(keys.map((k) => engine.load(k)));
+  } catch (err) {
+    scan.wantFailedAt = performance.now();
+    log('error', `Couldn’t load ${keys.join(', ')}: ${err.message}`);
+  } finally {
+    scan.fetching = false;
+  }
 }
 
 function onConfirmed(t) {

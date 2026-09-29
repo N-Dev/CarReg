@@ -82,6 +82,15 @@ export class Adaptive {
   }
 }
 
+/**
+ * Whether to load the models a better tier needs. Data Saver only holds back real downloads: models
+ * already on the phone load from its cache, which uses no data. A quality fixed in settings always loads.
+ * cached: for each missing model, whether it's already on the phone.
+ */
+export function mayLoad({ saveData = false, force = false, cached = [] } = {}) {
+  return force || !saveData || (cached.length > 0 && cached.every(Boolean));
+}
+
 /** Idle mode: after `idleMs` without any plate in view, analyse only every `idleFrameMs`. */
 export class Idle {
   constructor({ idleMs = 2500, idleFrameMs = 250 } = {}) { this.idleMs = idleMs; this.frameMs = idleFrameMs; this.lastSeen = null; }

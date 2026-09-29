@@ -10,7 +10,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
-import { Adaptive, Idle, TIERS, ORDER } from '../js/adaptive.js';
+import { Adaptive, Idle, TIERS, ORDER, mayLoad } from '../js/adaptive.js';
+import { SpeedLog, Hist } from '../js/speedlog.js';
 import { expired } from '../js/store.js';
 import { crc32, zip } from '../js/zip.js';
 import { accuracyStats, thresholdCurve, suggestThreshold, alignOps, confusions, datasetFiles } from '../js/fieldtest.js';
@@ -146,6 +147,64 @@ test('idle mode: slows down after 2.5 s without a plate, wakes on the next one',
   assert.equal(idle.observe(0, 2600), true);
   assert.equal(idle.observe(1, 2700), false);
   assert.equal(idle.frameMs, 250);
+});
+
+test('Data Saver: sharper models load only if they are already on the phone', () => {
+  assert.equal(mayLoad({ saveData: false }), true, 'no Data Saver: download as usual');
+  assert.equal(mayLoad({ saveData: true, cached: [true, true] }), true, 'already on the phone: loading uses no data');
+  assert.equal(mayLoad({ saveData: true, cached: [true, false] }), false, 'one still to download: wait');
+  assert.equal(mayLoad({ saveData: true, cached: [] }), false);
+  assert.equal(mayLoad({ saveData: true, force: true, cached: [false] }), true, 'a quality fixed in settings always loads');
+  const cacheName = (src) => (src.match(/MODEL_CACHE = '([^']+)'/) || [])[1];
+  assert.ok(cacheName(read('sw.js')), 'sw.js names its model cache MODEL_CACHE');
+  assert.equal(cacheName(read('js/engine.js')), cacheName(read('sw.js')), 'the page must look for models where the service worker saves them');
+});
+
+// ---------------------------------------------------------------- speed figures for diagnostics
+const near = (a, b) => typeof a === 'number' && Math.abs(a - b) <= 3; // 5 ms buckets
+
+test('speed log: histogram percentiles within a bucket, capped at the top', () => {
+  const h = new Hist();
+  assert.equal(h.q(0.5), null);
+  for (let i = 1; i <= 100; i++) h.add(i * 10);
+  assert.ok(near(h.q(0.5), 500), `median ${h.q(0.5)}`);
+  assert.ok(near(h.q(0.95), 950), `p95 ${h.q(0.95)}`);
+  h.add(Number.NaN);
+  h.add(-4);
+  assert.equal(h.n, 100, 'bad values are ignored');
+  const slow = new Hist();
+  slow.add(9000);
+  assert.equal(slow.q(0.5), 2000, 'anything over 2 s counts as 2 s');
+});
+
+test('speed log: per setup and quality, idle apart, finder and reader split, minute by minute', () => {
+  const s = new SpeedLog();
+  assert.equal(s.summary(), null);
+  let t = 0;
+  const fast = { det: 'det384', ocr: 'ocrFast', tier: 'fast', setup: 'cpu-4t' };
+  for (let i = 0; i < 20; i++) s.add({ ...fast, t: (t += 100), total: 62, finder: 40, reader: 20, plates: 2 });
+  for (let i = 0; i < 10; i++) s.add({ ...fast, t: (t += 250), total: 39, finder: 38, idle: true });
+  t = 61000; // a minute later the phone is warm: the same work takes longer
+  for (let i = 0; i < 20; i++) s.add({ ...fast, t: (t += 100), total: 91, finder: 60, reader: 30, plates: 1 });
+  s.add({ t: (t += 300), total: 300, finder: 290, det: 'det640', ocr: 'ocrAcc', tier: 'sharp', idle: true, setup: 'gpu' });
+
+  const sum = s.summary();
+  assert.equal(sum.frames, 51);
+  const f = sum.setups['cpu-4t'].fast;
+  assert.equal(f.frames, 50);
+  assert.equal(f.idleFrames, 10);
+  assert.ok(near(f.active, 62) && near(f.activeP95, 91) && near(f.idle, 39), JSON.stringify(f));
+  assert.ok(near(f.finder.det384, 40), 'finder median over every frame');
+  assert.ok(near(f.readerPerPlate.ocrFast, 10), 'reader time per plate, over frames that read plates');
+  assert.equal(f.platesPerActiveFrame, 1.5);
+  const g = sum.setups.gpu.sharp;
+  assert.ok(g.frames === 1 && near(g.idle, 300) && near(g.finder.det640, 290) && !('active' in g) && !('readerPerPlate' in g), JSON.stringify(g));
+
+  assert.deepEqual(sum.timeline.map((e) => [e.min, e.setup, e.tier, e.frames]), [[0, 'cpu-4t', 'fast', 30], [1, 'cpu-4t', 'fast', 20], [1, 'gpu', 'sharp', 1]]);
+  assert.ok(near(sum.timeline[0].active, 62) && near(sum.timeline[1].active, 91), 'the timeline shows the slowdown');
+  assert.ok(near(sum.timeline[1].finder.det384, 60));
+  assert.ok(sum.spanMin > 1 && sum.spanMin < 1.2, `span ${sum.spanMin}`);
+  JSON.parse(JSON.stringify(sum)); // plain data for the diagnostics
 });
 
 // ---------------------------------------------------------------- history retention

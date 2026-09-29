@@ -8,7 +8,7 @@ import { CFG, MODELS } from './engine.js';
 import { samples, history as plates, SENS } from './store.js';
 import { accuracyStats, thresholdCurve, suggestThreshold, confusions, datasetFiles } from './fieldtest.js';
 import { zip } from './zip.js';
-import { TIERS } from './adaptive.js';
+import { TIERS, ORDER } from './adaptive.js';
 import {
   $, $$, settings, state, engine, on, log, logEntries, T0, setSetting, showSheet, copyText, shareOrDownload, mb, haptic,
 } from './ctx.js';
@@ -90,6 +90,10 @@ async function collect() {
     startErrors: state.engineErrors.length ? state.engineErrors : null,
   };
   d.live = liveStats();
+  // Per engine setup and quality tier, since the app opened (medians in ms), and a per-minute timeline.
+  d.speed = scan.speed.summary();
+  // Kept here as well as in the log, which only includes its last 200 lines.
+  if (ui.bench || ui.threads) d.benchmarks = { models: ui.bench || null, threads: ui.threads ? ui.threads.rows : null };
   d.storage = {};
   try {
     const est = await nav.storage.estimate();
@@ -133,6 +137,7 @@ async function renderOverview() {
       <canvas class="dgraph" id="dbgGraph"></canvas>
       <div class="dlegend">${Object.entries(TIERS).map(([k, v]) => `<span><i style="background:${TIER_COLORS[k]}"></i>${v.label}</span>`).join('')}<span><i style="background:#f87171"></i>over budget</span><span><i class="dash"></i>${scan.adaptive.budget} ms budget</span></div>
       <div id="dbgLive">${liveKV(live)}</div>`)}
+    ${section('Speed by quality', `<div id="dbgSpeed">${speedTable(d.speed)}</div>`)}
     ${section('AI engine', kv([
       ['Status', d.engine.status], ['Runs on', d.engine.label], ['ONNX Runtime', d.engine.runtime], ['Backend', d.engine.backend],
       ['Threads', d.engine.threads && `${d.engine.threads} (setting: ${d.engine.threadsSetting})`], ['Runtime from', d.engine.source],
@@ -176,10 +181,28 @@ function drawBigGraph() {
   if (c) drawSpark(c, scan.perf, { budget: scan.adaptive.budget, span: 150 });
 }
 
+const setupLabel = (s) => (s === 'gpu' ? 'GPU' : `CPU, ${s.replace(/^cpu-(\d+)t$/, '$1')} thread${s === 'cpu-1t' ? '' : 's'}`);
+
+/** Median frame times per engine setup and quality since the app opened (the detail is in the diagnostics). */
+function speedTable(s) {
+  if (!s) return '<p class="dnote">Nothing scanned yet.</p>';
+  const rows = [];
+  for (const [setup, tiers] of Object.entries(s.setups)) {
+    for (const k of ORDER) {
+      const r = tiers[k];
+      if (r) rows.push(`<tr><td>${TIERS[k].label} <small>${esc(setupLabel(setup))}</small></td><td>${r.frames}</td><td>${r.active != null ? `${r.active} ms` : '—'}</td><td>${r.idle != null ? `${r.idle} ms` : '—'}</td></tr>`);
+    }
+  }
+  return `<table class="dtable"><thead><tr><th>Quality</th><th>Frames</th><th>Plate in view</th><th>No plate</th></tr></thead><tbody>${rows.join('')}</tbody></table>
+    <p class="dnote">Median time per frame since PlateSight opened. Live scanning aims for under ${scan.adaptive.budget} ms.</p>`;
+}
+
 function tickOverview() {
   if (!ui.open || ui.tab !== 'overview') return;
   const el = $('#dbgLive');
   if (el) el.innerHTML = liveKV(liveStats());
+  const sp = $('#dbgSpeed');
+  if (sp) sp.innerHTML = speedTable(scan.speed.summary());
   drawBigGraph();
 }
 

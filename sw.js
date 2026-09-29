@@ -22,7 +22,7 @@ const SHARE_CACHE = 'ps-share';
 const SHELL = [
   './', 'index.html', 'app.css', 'manifest.webmanifest', 'models/ocr.json',
   'js/config.js', 'js/main.js', 'js/ctx.js', 'js/board.js', 'js/overlay.js', 'js/boot.js',
-  'js/scan.js', 'js/adaptive.js', 'js/photo.js', 'js/video.js', 'js/history-view.js', 'js/detail.js',
+  'js/scan.js', 'js/adaptive.js', 'js/speedlog.js', 'js/photo.js', 'js/video.js', 'js/history-view.js', 'js/detail.js',
   'js/settings-view.js', 'js/debug.js', 'js/fieldtest.js', 'js/zip.js', 'js/cards.js',
   'js/engine.js', 'js/engine-worker.js', 'js/tracker.js', 'js/formats.js', 'js/store.js', 'js/ui.js',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/favicon-32.png', 'icons/apple-touch-icon.png',

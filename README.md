@@ -32,7 +32,7 @@ The first launch downloads the AI (about 22 MB, once); after that PlateSight wor
 | **Balanced** | 384 px | accurate for new plates, fast once confirmed |
 | **Sharp** | 640 px (smaller, further plates) | accurate for new plates, fast once confirmed |
 
-**Auto** (the default) starts on Fast and steps up after a few seconds of headroom, fetching the extra models in the background (not on Data Saver). It aims for 10 analysed frames a second: it steps down within about a second if frames get slower than that (as they do when a phone heats up and throttles) or if Chrome reports critical CPU load, and waits longer each time before retrying a tier that proved too slow. While no plate is in view it analyses 4 frames a second instead of 15.
+**Auto** (the default) starts on Fast and steps up after a few seconds of headroom, fetching the extra models in the background (on Data Saver it only uses them once they're already on the phone, which costs no data). It aims for 10 analysed frames a second: it steps down within about a second if frames get slower than that (as they do when a phone heats up and throttles) or if Chrome reports critical CPU load, and waits longer each time before retrying a tier that proved too slow. While no plate is in view it analyses 4 frames a second instead of 15.
 
 ## Developer mode
 
@@ -43,7 +43,7 @@ Tap the **PlateSight logo seven times** (like Android's developer options). You 
 - **Read inspector** in every plate's details: the exact 128 × 64 image the plate reader saw, how sure it was of each character and what it considered instead, its country guess, and how the frames voted.
 - **Field test:** mark any reading *Right* or *Wrong* (and type the real plate).
 - **Debug panel** (bug icon, top bar):
-  - *Overview:* phone, engine, live speed and storage diagnostics, with **Copy diagnostics** to send when something goes wrong.
+  - *Overview:* phone, engine, live speed (with the median frame time for each quality tier) and storage diagnostics, with **Copy diagnostics** to send when something goes wrong. The copied text also has the benchmark results, finder and reader times per tier, kept apart for the CPU and GPU, and a minute-by-minute timeline that shows the phone slowing down as it warms up.
   - *Log:* everything the app did (start-up, downloads, tier changes, confirmations, errors), filterable.
   - *Tools:* model benchmark, a CPU-thread benchmark that finds the fastest thread count, overrides (quality, threads, detection and confirm thresholds, idle mode, raw boxes), "simulate a hot phone", restart the engine, download all models.
   - *Accuracy:* your field-test results (exact and per-character accuracy, common mix-ups, recent misses), a confidence-threshold chart that suggests a threshold once you've tested 20 plates, and **Export .zip** of a training set.
@@ -77,6 +77,7 @@ js/main.js                    wires the screens together and starts the AI
 js/ctx.js                     shared state, settings, events, debug log, helpers
 js/boot.js                    AI engine start-up, progress, fallbacks and safe mode
 js/scan.js                    live scanning     js/adaptive.js   quality tiers and idle mode
+js/speedlog.js                speed figures per quality tier for diagnostics and tuning
 js/photo.js, js/video.js      photo and video modes
 js/history-view.js            history, search, export, retention
 js/detail.js                  plate details, read inspector, field test
@@ -103,7 +104,7 @@ tests/                        unit tests and browser end-to-end tests
 Edit on `main` and push. The GitHub Action then:
 
 1. runs the unit tests (`node --test tests/*.test.mjs`): they check that every model file matches its size and revision in `js/config.js`, that the service worker caches every app file, and the logic behind tracking, quality tiers, retention, field testing and the ZIP export;
-2. runs the end-to-end tests in Chromium emulating a Pixel 7, with a fake camera and the real ONNX Runtime Web: first launch, live scan, photo, video, history, share target, offline use, moving between cars, developer mode, field testing and export, a slow first launch, an update arriving mid-download, upgrading from 1.0 without re-downloading the models, a damaged copy of the AI engine, and GPU mode on WebGPU. If they fail, it retries once, then saves logs and screenshots to the `ci-logs` branch;
+2. runs the end-to-end tests in Chromium emulating a Pixel 7, with a fake camera and the real ONNX Runtime Web: first launch, live scan, photo, video, history, share target, offline use, moving between cars, developer mode, field testing and export, a slow first launch, an update arriving mid-download, upgrading from 1.0 without re-downloading the models, Auto quality on Data Saver, a damaged copy of the AI engine, and GPU mode on WebGPU. If they fail, it retries once, then saves logs and screenshots to the `ci-logs` branch;
 3. only if everything passes, publishes to GitHub Pages with the build id stamped into `js/config.js` and `sw.js`. Installed phones pick the update up and offer a reload (never in the middle of a download).
 
 Run the browser tests yourself with `pip install playwright onnxruntime numpy pillow`, `python -m playwright install chromium`, then `python tests/e2e/run_e2e.py` (add `REAL_ORT=<onnxruntime-web dist folder>` for the real runtime; `SECTIONS=debug,slow` to run some).
