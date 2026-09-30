@@ -13,7 +13,7 @@ It knows Irish plates well: it corrects misreads using the format (e.g. `24lD123
 
 **Open it on your phone:** <https://n-dev.github.io/CarReg/> (in Chrome → ⋮ → Install app)
 
-This repository also has **TrafficSight**, a traffic counter: see [TrafficSight](#trafficsight-count-the-traffic-on-your-road) below.
+This repository also has **TrafficSight**, a traffic counter: see [TrafficSight](#trafficsight-count-the-traffic-on-your-road) below, and **RoadSight**, both apps in one native Android app: see [RoadSight](#roadsight-both-as-a-native-android-app).
 
 ## Using it
 
@@ -148,6 +148,12 @@ count/js/report.js, pdf.js      council report (PDF)    count/js/charts.js   res
 count/js/store.js               sessions (IndexedDB)    count/js/config.js   model files and versions
 count/models/                   YOLOX tiny and nano (COCO), from github.com/Megvii-BaseDetection/YOLOX
 ```
+
+## RoadSight: both as a native Android app
+
+**Install on the phone:** open <https://github.com/N-Dev/CarReg/releases/latest/download/RoadSight.apk> on it, allow your browser to install unknown apps when asked (once), and tap Install.
+
+RoadSight has PlateSight's live scanning, photo reading and history, and TrafficSight's counting, results and council report, in one app with four tabs (Plates, Traffic, History, Settings). It runs the same AI models natively with ONNX Runtime for Android rather than in Chrome, and a speed test in Settings picks the fastest way to run each model on your phone (CPU, XNNPACK or NNAPI). It doesn't have video mode or the developer tools yet. The code, tests and build are described in [android/README.md](android/README.md).
 
 ## Privacy
 

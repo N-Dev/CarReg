@@ -1,0 +1,86 @@
+# The RoadSight Android app (android/): builds it, runs the unit tests (with the real AI models), runs
+# the on-device tests on an emulator, and publishes the APK as a GitHub release.
+#   Download: https://github.com/N-Dev/CarReg/releases/latest/download/RoadSight.apk
+#   Logs, test results and emulator screenshots of the last run: the android-ci branch.
+name: Android app
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - 'models/**'
+      - 'count/models/**'
+      - 'tests/e2e/assets/**'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-app
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  app:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      VERSION_CODE: ${{ github.run_number }}
+      VERSION_NAME: 1.0.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build the app and run the unit tests
+        working-directory: android
+        run: |
+          mkdir -p ../ci-out
+          ./gradlew --no-daemon --stacktrace :core:test :app:assembleRelease :app:assembleDebug :app:assembleDebugAndroidTest 2>&1 | tee ../ci-out/build.log
+
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: On-device tests (emulator)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          cores: 4
+          ram-size: 4096M
+          disk-size: 4096M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back emulated
+          script: bash android/ci/emulator-tests.sh
+
+      - name: Release
+        if: success() && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android/app/build/outputs/apk/release/app-arm64-v8a-release.apk RoadSight.apk
+          gh release create "v${VERSION_NAME}" RoadSight.apk --target "${GITHUB_SHA}" \
+            --title "RoadSight ${VERSION_NAME}" --notes-file android/ci/release-notes.md --latest
+          echo "Released v${VERSION_NAME}: https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/RoadSight.apk" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish logs and screenshots (android-ci branch)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: bash android/ci/publish-logs.sh

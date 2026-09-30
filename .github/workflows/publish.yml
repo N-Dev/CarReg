@@ -13,6 +13,8 @@ name: Test and publish
 on:
   push:
     branches: [main]
+    # The Android app has its own workflow (android.yml); changes to it alone don't republish the site.
+    paths-ignore: ['android/**', '.github/workflows/android.yml']
   workflow_dispatch:
 
 permissions:
@@ -136,7 +138,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout --orphan publish
-          rm -rf tests   # test photos and scripts aren’t part of the app
+          rm -rf tests android   # test photos and scripts, and the Android app's source, aren’t part of the site
           git add -A
           git commit -q -m "Publish ${GITHUB_SHA::7} with ONNX Runtime Web"
           git push -f origin publish:gh-pages
