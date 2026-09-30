@@ -60,7 +60,7 @@ class ScreensTest {
         waitForText("Set up the counting lines")
         settle()
         Shots.take("03-traffic-setup")
-        compose.onNodeWithText("Done").performScrollTo().performClick()
+        compose.onNodeWithText("Done").performClick()
         waitForText("Start counting")
         compose.onNodeWithTag("tab-history").performClick()
         waitForText("Traffic counts")
@@ -91,7 +91,7 @@ class ScreensTest {
             waitForText("tap to wake", timeoutMs = 15_000, substring = true)
             Shots.take("10-dimmed")
             compose.onNodeWithText("tap to wake", substring = true).performClick()
-            waitForText("Stop")
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("tap to wake", substring = true).fetchSemanticsNodes().isEmpty() }
             compose.onNodeWithText("Stop").performClick()
             waitForText("See results")
             Shots.take("11-stopped")

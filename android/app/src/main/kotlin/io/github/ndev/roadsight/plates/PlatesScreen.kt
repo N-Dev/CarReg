@@ -29,6 +29,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -58,6 +59,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.ndev.roadsight.App
+import io.github.ndev.roadsight.CameraGate
 import io.github.ndev.roadsight.camera.CameraPreview
 import io.github.ndev.roadsight.core.plate.Formats
 import io.github.ndev.roadsight.ui.C
@@ -72,11 +74,6 @@ fun PlatesScreen() {
     val app = App.instance
     val ui by app.plates.ui.collectAsState()
     val notice by app.engine.notice.collectAsState()
-    var camera by remember { mutableStateOf<Camera?>(null) }
-    var paused by rememberSaveable { mutableStateOf(false) }
-    var torch by remember { mutableStateOf(false) }
-    var zoom by remember { mutableFloatStateOf(1f) }
-    var selected by remember { mutableStateOf<TrayItem?>(null) }
     var photo by remember { mutableStateOf<android.net.Uri?>(null) }
     val shared by app.sharedPhoto.collectAsState()
     LaunchedEffect(shared) {
@@ -92,6 +89,21 @@ fun PlatesScreen() {
         PhotoScreen(current, onClose = { photo = null })
         return
     }
+    // Photos can be read without the camera.
+    CameraGate(extra = {
+        OutlinedButton(onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
+            Text("Read a photo instead")
+        }
+    }) { LiveScreen(app, ui, notice, onPick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) }
+}
+
+@Composable
+private fun LiveScreen(app: App, ui: PlateUi, notice: String?, onPick: () -> Unit) {
+    var camera by remember { mutableStateOf<Camera?>(null) }
+    var paused by rememberSaveable { mutableStateOf(false) }
+    var torch by remember { mutableStateOf(false) }
+    var zoom by remember { mutableFloatStateOf(1f) }
+    var selected by remember { mutableStateOf<TrayItem?>(null) }
 
     DisposableEffect(paused) {
         if (!paused) app.plates.start()
@@ -138,7 +150,7 @@ fun PlatesScreen() {
                     cam.cameraControl.enableTorch(torch)
                 }
             }
-            RoundButton(Ic.photo) { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+            RoundButton(Ic.photo, onClick = onPick)
             RoundButton(if (paused) Ic.play else Ic.pause) { paused = !paused }
         }
 

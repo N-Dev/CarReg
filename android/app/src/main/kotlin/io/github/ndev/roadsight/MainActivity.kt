@@ -1,6 +1,7 @@
 package io.github.ndev.roadsight
 
 import android.Manifest
+import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -54,7 +55,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.DisposableEffect
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.ndev.roadsight.history.HistoryScreen
 import io.github.ndev.roadsight.plates.PlatesScreen
 import io.github.ndev.roadsight.settings.SettingsScreen
@@ -137,7 +143,7 @@ fun RoadSightApp() {
                 .background(C.bg),
         ) {
             when (tab) {
-                Tab.PLATES -> CameraGate { PlatesScreen() }
+                Tab.PLATES -> PlatesScreen()
                 Tab.TRAFFIC -> CameraGate { TrafficScreen() }
                 Tab.HISTORY -> HistoryScreen()
                 Tab.SETTINGS -> SettingsScreen()
@@ -153,14 +159,18 @@ private fun iconFor(t: Tab): ImageVector = when (t) {
     Tab.SETTINGS -> Icons.Filled.Settings
 }
 
-/** Shows the screen once the camera is allowed; asks for it otherwise. */
+/**
+ * Shows the screen once the camera is allowed; asks for it otherwise. `extra` adds something that works
+ * without the camera (reading a photo).
+ */
 @Composable
-fun CameraGate(content: @Composable () -> Unit) {
+fun CameraGate(extra: (@Composable () -> Unit)? = null, content: @Composable () -> Unit) {
     val context = LocalContext.current
     var granted by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
     }
     var asked by rememberSaveable { mutableStateOf(false) }
+    val activity = context as? Activity
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         granted = ok
         asked = true
@@ -183,9 +193,33 @@ fun CameraGate(content: @Composable () -> Unit) {
             )
             Spacer(Modifier.height(20.dp))
             Button(
-                onClick = { launcher.launch(Manifest.permission.CAMERA) },
+                onClick = {
+                    // After "Don't allow" twice Android stops asking: the app's settings page is the way then.
+                    if (asked && activity?.let { ActivityCompat.shouldShowRequestPermissionRationale(it, Manifest.permission.CAMERA) } == false) {
+                        runCatching {
+                            context.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)))
+                        }
+                    } else {
+                        launcher.launch(Manifest.permission.CAMERA)
+                    }
+                },
                 colors = ButtonDefaults.buttonColors(containerColor = C.mint, contentColor = C.bg),
             ) { Text("Allow the camera") }
+            if (extra != null) {
+                Spacer(Modifier.height(12.dp))
+                extra()
+            }
         }
+    }
+    // Back from the app's settings page with the camera allowed.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val obs = LifecycleEventObserver { _, e ->
+            if (e == Lifecycle.Event.ON_RESUME && !granted) {
+                granted = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+            }
+        }
+        lifecycle.addObserver(obs)
+        onDispose { lifecycle.removeObserver(obs) }
     }
 }

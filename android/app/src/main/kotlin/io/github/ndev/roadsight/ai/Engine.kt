@@ -31,6 +31,13 @@ enum class Model(val key: String, val asset: String, val label: String, val size
     VEH_TINY("vehTiny", "models/vehicles-tiny.onnx", "Traffic finder (standard)", 416),
     ;
 
+    /**
+     * The plate readers take a batch of crops whose size changes from run to run (one per plate, three per
+     * plate in photo mode). XNNPACK kept the first batch size it saw (in the emulator test) and NNAPI needs
+     * fixed sizes, so the readers always run on ONNX Runtime's own CPU code.
+     */
+    val cpuOnly: Boolean get() = this == OCR_FAST || this == OCR_ACC
+
     companion object {
         fun of(key: String): Model = entries.first { it.key == key }
     }
@@ -75,17 +82,20 @@ class Engine(private val app: App) {
     }.getOrElse { emptyMap() }
 
     /**
-     * The setup a model runs with: the one chosen in Settings, or the speed test's pick, or XNNPACK (about
-     * twice as fast as ONNX Runtime's own CPU code in tests; it falls back to that if it can't run a model).
+     * The setup a model runs with: the one chosen in Settings, or the speed test's pick, or ONNX Runtime's
+     * own CPU code (dependable everywhere; which accelerator is faster depends on the phone, which is what
+     * the speed test finds out). The plate readers always use the CPU (see [Model.cpuOnly]).
      */
     fun configFor(m: Model): RunConfig {
         val p = app.prefs
         val threads = if (p.threads > 0) p.threads else defaultThreads
+        val tuned = if (p.accel == "auto") tunedConfigs()[m.key] else null
+        if (m.cpuOnly) return tuned?.takeIf { it.accel == Accel.CPU } ?: RunConfig(Accel.CPU, threads)
         if (p.accel != "auto") {
             val a = runCatching { Accel.valueOf(p.accel) }.getOrDefault(Accel.CPU)
             return RunConfig(a, threads)
         }
-        return tunedConfigs()[m.key] ?: RunConfig(Accel.XNNPACK, threads)
+        return tuned ?: RunConfig(Accel.CPU, threads)
     }
 
     fun options(cfg: RunConfig): OrtSession.SessionOptions {
@@ -190,11 +200,12 @@ class SpeedTest(private val app: App) {
     @Volatile
     var cancelled = false
 
-    fun configs(): List<RunConfig> {
+    fun configs(m: Model): List<RunConfig> {
         val c = engine.cores
         val threads = listOf(2, 4, 6, 8).filter { it <= c }.ifEmpty { listOf(1) }
-        return threads.map { RunConfig(Accel.CPU, it) } +
-            listOf(RunConfig(Accel.XNNPACK, minOf(4, c)), RunConfig(Accel.XNNPACK, minOf(6, c)).takeIf { c >= 6 }, RunConfig(Accel.NNAPI, minOf(4, c))).filterNotNull()
+        val cpu = threads.map { RunConfig(Accel.CPU, it) }
+        if (m.cpuOnly) return cpu
+        return cpu + listOfNotNull(RunConfig(Accel.XNNPACK, minOf(4, c)), RunConfig(Accel.XNNPACK, minOf(6, c)).takeIf { c >= 6 }, RunConfig(Accel.NNAPI, minOf(4, c)))
     }
 
     fun run(models: List<Model>, progress: (String) -> Unit): List<SpeedResult> {
@@ -205,13 +216,13 @@ class SpeedTest(private val app: App) {
         val cpu = RunConfig(Accel.CPU, engine.defaultThreads)
         val plateBox: PlateBox? = engine.create(Model.DET384, cpu).use { n -> pipe.detect(frame, n, 384, 0.35, fullRect(sample)).maxByOrNull { it.score } }
         val out = ArrayList<SpeedResult>()
-        val cfgs = configs()
+        val total = models.sumOf { configs(it).size }
         var done = 0
         for (m in models) {
             val bytes = engine.modelBytes(m)
-            for (cfg in cfgs) {
+            for (cfg in configs(m)) {
                 if (cancelled) break
-                progress("${m.label} · ${cfg.label} (${++done} of ${models.size * cfgs.size})")
+                progress("${m.label} · ${cfg.label} (${++done} of $total)")
                 out.add(runOne(m, cfg, bytes, frame, pipe, plateBox))
             }
         }
@@ -232,8 +243,9 @@ class SpeedTest(private val app: App) {
                 val veh = VehicleDetector()
                 val once: () -> Boolean = when (m) {
                     Model.DET384, Model.DET640 -> { { pipe.detect(frame, n, m.size, 0.35, fullRect(frame.bitmap)).any { it.score > 0.5 } } }
+                    // A batch of three crops, as in photo mode: the answer must be right with a batch too.
                     Model.OCR_FAST, Model.OCR_ACC -> {
-                        { plateBox != null && vote(pipe.read(frame, n, listOf(plateBox), PlatePipeline.TTA.take(1))[0])?.key == "241D12345" }
+                        { plateBox != null && vote(pipe.read(frame, n, listOf(plateBox), PlatePipeline.TTA)[0])?.key == "241D12345" }
                     }
                     Model.VEH_NANO, Model.VEH_TINY -> { { veh.detect(frame, n, doubleArrayOf(0.0, 0.0, 1.0, 1.0), 0.3).dets.any { it.cls == "car" || it.cls == "truck" } } }
                 }

@@ -75,6 +75,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.ndev.roadsight.App
 import io.github.ndev.roadsight.camera.CameraPreview
 import io.github.ndev.roadsight.core.traffic.Kinds
@@ -175,6 +178,24 @@ fun TrafficScreen() {
     DisposableEffect(Unit) {
         view.keepScreenOn = true
         onDispose { view.keepScreenOn = false }
+    }
+
+    // The camera stops while the app is in the background (or the screen is off), and so does counting.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        var stoppedAt = 0L
+        val obs = LifecycleEventObserver { _, e ->
+            if (e == Lifecycle.Event.ON_STOP && app.traffic.ui.value.running) stoppedAt = System.currentTimeMillis()
+            if (e == Lifecycle.Event.ON_START && stoppedAt > 0) {
+                val gap = (System.currentTimeMillis() - stoppedAt) / 1000
+                stoppedAt = 0
+                if (gap >= 3 && app.traffic.ui.value.running) {
+                    scope.launch { snack.showSnackbar("Counting was paused for ${clock(gap * 1000)} while RoadSight wasn’t on screen", duration = SnackbarDuration.Long) }
+                }
+            }
+        }
+        lifecycle.addObserver(obs)
+        onDispose { lifecycle.removeObserver(obs) }
     }
 
     // A running session's end time is saved every 30 seconds, so nothing is lost if the phone dies.
@@ -304,24 +325,45 @@ fun TrafficScreen() {
                 }
             }
         }
+        // The counts (or the set-up form) scroll; the buttons under them are always in view.
         val panel: @Composable (Modifier) -> Unit = { m ->
-            Column(m.background(C.bg).verticalScroll(rememberScrollState()).imePadding().padding(14.dp)) {
-                if (editing) {
-                    SetupForm(
-                        distanceText = distanceText, onDistance = { distanceText = it },
-                        limit = limit, onLimit = { limit = it },
-                        dir1 = dir1, onDir1 = { dir1 = it }, dir2 = dir2, onDir2 = { dir2 = it },
-                        site = site, onSite = { site = it },
-                        onReset = {
-                            draft = Lines.default()
-                            val n = suggestNames(draft)
-                            dir1 = n.first
-                            dir2 = n.second
-                        },
-                        onDone = { saveEditor() },
-                    )
-                } else {
-                    CountsPanel(ui, now, onSetup = { openEditor() }, onStartStop = { startStop() })
+            Column(m.background(C.bg).imePadding().padding(horizontal = 14.dp, vertical = 12.dp)) {
+                Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+                    if (editing) {
+                        SetupForm(
+                            distanceText = distanceText, onDistance = { distanceText = it },
+                            limit = limit, onLimit = { limit = it },
+                            dir1 = dir1, onDir1 = { dir1 = it }, dir2 = dir2, onDir2 = { dir2 = it },
+                            site = site, onSite = { site = it },
+                        )
+                    } else {
+                        CountsPanel(ui, now)
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (editing) {
+                        OutlinedButton(
+                            onClick = {
+                                draft = Lines.default()
+                                val n = suggestNames(draft)
+                                dir1 = n.first
+                                dir2 = n.second
+                            },
+                            modifier = Modifier.weight(1f),
+                        ) { Text("Reset lines") }
+                        Button(onClick = { saveEditor() }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = C.mint, contentColor = C.bg)) {
+                            Text("Done", fontWeight = FontWeight.Bold)
+                        }
+                    } else {
+                        OutlinedButton(onClick = { openEditor() }, enabled = !ui.running, modifier = Modifier.weight(1f)) { Text("Set up") }
+                        Button(
+                            onClick = { startStop() },
+                            enabled = ui.ready || ui.running,
+                            modifier = Modifier.weight(1.4f),
+                            colors = ButtonDefaults.buttonColors(containerColor = if (ui.running) C.red else C.mint, contentColor = C.bg),
+                        ) { Text(if (ui.running) "Stop" else "Start counting", fontWeight = FontWeight.Bold) }
+                    }
                 }
             }
         }
@@ -362,7 +404,7 @@ private fun clock(ms: Long): String {
 }
 
 @Composable
-private fun ColumnScope.CountsPanel(ui: TrafficUi, now: Long, onSetup: () -> Unit, onStartStop: () -> Unit) {
+private fun ColumnScope.CountsPanel(ui: TrafficUi, now: Long) {
     val prefs = App.instance.prefs
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
@@ -391,16 +433,6 @@ private fun ColumnScope.CountsPanel(ui: TrafficUi, now: Long, onSetup: () -> Uni
         }
     }
     Text("A→B: ${prefs.dir1} · B→A: ${prefs.dir2}", color = C.muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
-    Spacer(Modifier.height(12.dp))
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        OutlinedButton(onClick = onSetup, enabled = !ui.running, modifier = Modifier.weight(1f)) { Text("Set up") }
-        Button(
-            onClick = onStartStop,
-            enabled = ui.ready || ui.running,
-            modifier = Modifier.weight(1.4f),
-            colors = ButtonDefaults.buttonColors(containerColor = if (ui.running) C.red else C.mint, contentColor = C.bg),
-        ) { Text(if (ui.running) "Stop" else "Start counting", fontWeight = FontWeight.Bold) }
-    }
 }
 
 @Composable
@@ -427,8 +459,6 @@ private fun ColumnScope.SetupForm(
     onDir2: (String) -> Unit,
     site: String,
     onSite: (String) -> Unit,
-    onReset: () -> Unit,
-    onDone: () -> Unit,
 ) {
     Text("Set up the counting lines", color = C.text, fontSize = 17.sp, fontWeight = FontWeight.Bold)
     Text(
@@ -471,13 +501,6 @@ private fun ColumnScope.SetupForm(
     Spacer(Modifier.height(8.dp))
     Label("Where is this?")
     OutlinedTextField(site, { onSite(it.take(80)) }, singleLine = true, placeholder = { Text("e.g. Main Street, outside no. 12") }, modifier = Modifier.fillMaxWidth(), colors = fieldColors())
-    Spacer(Modifier.height(14.dp))
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        OutlinedButton(onClick = onReset, modifier = Modifier.weight(1f)) { Text("Reset lines") }
-        Button(onClick = onDone, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = C.mint, contentColor = C.bg)) {
-            Text("Done", fontWeight = FontWeight.Bold)
-        }
-    }
 }
 
 @Composable

@@ -222,10 +222,10 @@ private fun EngineSettings() {
         SettingRow(
             "Accelerator",
             when (p.accel) {
-                "auto" -> if (p.tuned.isEmpty()) "Auto uses XNNPACK until you run the speed test below, then the fastest setup it found for each model." else "Auto uses the fastest setup the speed test found for each model."
+                "auto" -> if (p.tuned.isEmpty()) "Auto uses the CPU until you run the speed test below, then the fastest setup it found for each model." else "Auto uses the fastest setup the speed test found for each model."
                 "CPU" -> "ONNX Runtime’s own CPU code."
-                "XNNPACK" -> "XNNPACK: CPU code tuned for phone processors. Often the fastest."
-                else -> "NNAPI: Android’s route to the phone’s AI chip or graphics. Fast on some phones, slow or unavailable on others."
+                "XNNPACK" -> "XNNPACK: CPU code tuned for phone processors. Often the fastest. (The plate readers always use the CPU.)"
+                else -> "NNAPI: Android’s route to the phone’s AI chip or graphics. Fast on some phones, slow or unavailable on others. (The plate readers always use the CPU.)"
             },
         ) {
             Segmented(listOf("auto" to "Auto", "CPU" to "CPU", "XNNPACK" to "XNNPACK", "NNAPI" to "NNAPI"), p.accel) { p.accel = it }

@@ -6,6 +6,7 @@ import io.github.ndev.roadsight.ai.Accel
 import io.github.ndev.roadsight.ai.BitmapFrame
 import io.github.ndev.roadsight.ai.Model
 import io.github.ndev.roadsight.ai.RunConfig
+import io.github.ndev.roadsight.ai.SpeedTest
 import io.github.ndev.roadsight.core.image.IntRect
 import io.github.ndev.roadsight.core.plate.PlatePipeline
 import io.github.ndev.roadsight.core.plate.vote
@@ -61,6 +62,39 @@ class PipelineTest {
             Shots.log("${m.key}: ${cars.size} vehicles · AI ${res.msInfer.toInt()} ms, picture ${res.msPrep.toInt()} ms")
             assertTrue(res.dets.map { it.cls }.toString(), cars.size >= 2)
         }
+    }
+
+    /** Why the plate readers stay on the CPU: with a batch of crops, other accelerators went wrong. */
+    @Test
+    fun readersWithABatchOfCrops() {
+        val frame = BitmapFrame(Shots.sample("car_ie.jpg"))
+        val pipe = PlatePipeline(app.engine.ocrConfig)
+        val box = pipe.detect(frame, app.engine.net(Model.DET384), 384, 0.35, IntRect(0, 0, frame.width, frame.height)).maxByOrNull { it.score }!!
+        for (cfg in listOf(RunConfig(Accel.CPU, 2), RunConfig(Accel.XNNPACK, 2), RunConfig(Accel.NNAPI, 2))) {
+            val r = runCatching {
+                app.engine.create(Model.OCR_FAST, cfg).use { n ->
+                    val one = vote(pipe.read(frame, n, listOf(box), PlatePipeline.TTA.take(1))[0])?.key
+                    val three = vote(pipe.read(frame, n, listOf(box), PlatePipeline.TTA)[0])?.key
+                    "one crop: $one, three crops: $three"
+                }
+            }
+            Shots.log("plate reader on ${cfg.label}: ${r.getOrElse { "failed (${it.javaClass.simpleName}: ${it.message?.take(60)})" }}")
+            if (cfg.accel == Accel.CPU) assertEquals("one crop: 241D12345, three crops: 241D12345", r.getOrNull())
+        }
+        // What the app uses.
+        assertEquals(Accel.CPU, app.engine.configFor(Model.OCR_FAST).accel)
+        assertEquals(Accel.CPU, app.engine.configFor(Model.OCR_ACC).accel)
+    }
+
+    /** The speed test in Settings: every setup checked on the sample photo and timed. */
+    @Test
+    fun speedTestFindsWorkingSetups() {
+        val results = SpeedTest(app).run(listOf(Model.DET384, Model.OCR_FAST, Model.VEH_NANO)) {}
+        for (r in results) Shots.log("speed test: ${r.model.key} on ${r.cfg.label}: ${r.ms?.let { "%.0f ms".format(it) } ?: "-"}${if (r.ok) "" else " (${r.note})"}")
+        for (m in listOf(Model.DET384, Model.OCR_FAST, Model.VEH_NANO)) {
+            assertTrue("$m works on the CPU", results.any { it.model == m && it.cfg.accel == Accel.CPU && it.ok })
+        }
+        assertTrue("readers are only tried on the CPU", results.filter { it.model == Model.OCR_FAST }.all { it.cfg.accel == Accel.CPU })
     }
 
     @Test
