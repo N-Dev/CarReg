@@ -44,8 +44,26 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      # A private signing key, if one is set up in the repository's secrets (see android/README.md);
+      # without one, builds are signed with the sideload key in the repository.
+      - name: Signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ROADSIGHT_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/roadsight-private.jks"
+            echo "ROADSIGHT_KEYSTORE_FILE=$RUNNER_TEMP/roadsight-private.jks" >> "$GITHUB_ENV"
+            echo "Signing with the private key from the repository's secrets."
+          else
+            echo "No private key in the secrets: signing with the sideload key in the repository."
+          fi
+
       - name: Build the app and run the unit tests
         working-directory: android
+        env:
+          ROADSIGHT_KEYSTORE_PASSWORD: ${{ secrets.ROADSIGHT_KEYSTORE_PASSWORD }}
+          ROADSIGHT_KEY_ALIAS: ${{ secrets.ROADSIGHT_KEY_ALIAS }}
+          ROADSIGHT_KEY_PASSWORD: ${{ secrets.ROADSIGHT_KEY_PASSWORD }}
         run: |
           mkdir -p ../ci-out
           ./gradlew --no-daemon --stacktrace :core:test :app:assembleRelease :app:assembleDebug :app:assembleDebugAndroidTest 2>&1 | tee ../ci-out/build.log

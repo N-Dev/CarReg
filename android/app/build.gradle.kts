@@ -23,14 +23,23 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    // One key for every build, so updates install over each other. It's in the repository because the
-    // app is sideloaded from GitHub; see android/README.md for moving it to a GitHub secret.
+    // One key for every build, so updates install over each other. A private key comes from the
+    // environment when there is one (CI decodes it from GitHub secrets); otherwise the sideload key in the
+    // repository is used. See android/README.md before switching: phones must reinstall once.
     signingConfigs {
         create("sideload") {
-            storeFile = file("../keystore/roadsight.jks")
-            storePassword = "roadsight-sideload"
-            keyAlias = "roadsight"
-            keyPassword = "roadsight-sideload"
+            val privateKey = System.getenv("ROADSIGHT_KEYSTORE_FILE")?.let { file(it) }?.takeIf { it.exists() }
+            if (privateKey != null) {
+                storeFile = privateKey
+                storePassword = System.getenv("ROADSIGHT_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ROADSIGHT_KEY_ALIAS")?.takeIf { it.isNotEmpty() } ?: "roadsight"
+                keyPassword = System.getenv("ROADSIGHT_KEY_PASSWORD")?.takeIf { it.isNotEmpty() } ?: System.getenv("ROADSIGHT_KEYSTORE_PASSWORD")
+            } else {
+                storeFile = file("../keystore/roadsight.jks")
+                storePassword = "roadsight-sideload"
+                keyAlias = "roadsight"
+                keyPassword = "roadsight-sideload"
+            }
         }
     }
 

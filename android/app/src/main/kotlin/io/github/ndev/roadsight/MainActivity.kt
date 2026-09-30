@@ -33,7 +33,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -68,7 +70,8 @@ import io.github.ndev.roadsight.history.HistoryScreen
 import io.github.ndev.roadsight.plates.PlatesScreen
 import io.github.ndev.roadsight.settings.SettingsScreen
 import io.github.ndev.roadsight.settings.SpeedTestOffer
-import io.github.ndev.roadsight.traffic.TrafficScreen
+import io.github.ndev.roadsight.traffic.TrafficTab
+import io.github.ndev.roadsight.video.VideoRequest
 import io.github.ndev.roadsight.ui.C
 import io.github.ndev.roadsight.ui.Ic
 import io.github.ndev.roadsight.ui.RoadSightTheme
@@ -94,7 +97,8 @@ class MainActivity : ComponentActivity() {
             @Suppress("DEPRECATION")
             intent.getParcelableExtra(Intent.EXTRA_STREAM)
         }
-        if (uri != null) App.instance.sharedPhoto.value = uri
+        if (uri == null) return
+        if (intent.type?.startsWith("video/") == true) App.instance.sharedVideo.value = uri else App.instance.sharedPhoto.value = uri
     }
 }
 
@@ -109,6 +113,12 @@ fun RoadSightApp() {
     val shared by app.sharedPhoto.collectAsState()
     val openSession by app.openSession.collectAsState()
     val update by app.updates.available.collectAsState()
+    val sharedVideo by app.sharedVideo.collectAsState()
+    val videoOpen by app.videoScreen.collectAsState()
+    val videoRequest by app.openVideo.collectAsState()
+    LaunchedEffect(videoRequest) {
+        videoRequest?.let { tab = if (it.mode == VideoRequest.PLATES) Tab.PLATES else Tab.TRAFFIC }
+    }
     LaunchedEffect(shared) { if (shared != null) tab = Tab.PLATES }
     LaunchedEffect(openSession) { if (openSession != null) tab = Tab.HISTORY }
     // While counting, the traffic screen has the whole screen (and the tabs can't stop it by accident).
@@ -118,7 +128,7 @@ fun RoadSightApp() {
     // the way round its lines were set up, as they only fit the picture that way.
     val activity = LocalContext.current as? Activity
     val prefs = app.prefs
-    val wanted = if (tab == Tab.TRAFFIC && prefs.trafficOrientation.isNotEmpty()) prefs.trafficOrientation else prefs.orientation
+    val wanted = if (tab == Tab.TRAFFIC && prefs.trafficOrientation.isNotEmpty() && !videoOpen) prefs.trafficOrientation else prefs.orientation
     LaunchedEffect(wanted) {
         activity?.requestedOrientation = when (wanted) {
             "portrait" -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
@@ -169,7 +179,7 @@ fun RoadSightApp() {
         ) {
             when (tab) {
                 Tab.PLATES -> PlatesScreen()
-                Tab.TRAFFIC -> CameraGate { TrafficScreen() }
+                Tab.TRAFFIC -> TrafficTab()
                 Tab.HISTORY -> HistoryScreen()
                 Tab.SETTINGS -> SettingsScreen()
             }
@@ -177,6 +187,29 @@ fun RoadSightApp() {
     }
     // First launch: offer the speed test.
     SpeedTestOffer()
+
+    // A video shared to the app: its plates, or its traffic?
+    sharedVideo?.let { uri ->
+        AlertDialog(
+            onDismissRequest = { app.sharedVideo.value = null },
+            containerColor = C.surface,
+            title = { Text("What should RoadSight do with this video?", color = C.text) },
+            text = { Text("Read the number plates in it, or count the traffic passing (you set the counting lines on a frame of it first).", color = C.muted) },
+            confirmButton = {
+                Column(horizontalAlignment = Alignment.End) {
+                    TextButton(onClick = {
+                        app.sharedVideo.value = null
+                        app.openVideo.value = VideoRequest(uri, VideoRequest.PLATES)
+                    }) { Text("Read the plates", color = C.mint) }
+                    TextButton(onClick = {
+                        app.sharedVideo.value = null
+                        app.openVideo.value = VideoRequest(uri, VideoRequest.TRAFFIC)
+                    }) { Text("Count the traffic", color = C.mint) }
+                    TextButton(onClick = { app.sharedVideo.value = null }) { Text("Cancel", color = C.muted) }
+                }
+            },
+        )
+    }
 }
 
 private fun iconFor(t: Tab): ImageVector = when (t) {

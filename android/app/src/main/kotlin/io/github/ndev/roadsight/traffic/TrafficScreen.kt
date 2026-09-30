@@ -86,6 +86,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.ndev.roadsight.App
+import io.github.ndev.roadsight.CameraGate
+import io.github.ndev.roadsight.video.VideoCountScreen
+import io.github.ndev.roadsight.video.VideoRequest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import io.github.ndev.roadsight.ai.Model
 import io.github.ndev.roadsight.debug.DebugStrip
 import io.github.ndev.roadsight.debug.enginesText
@@ -127,13 +133,35 @@ fun videoRect(w: Float, h: Float, aspect: Double): VideoRect {
 }
 
 /** A line end (end 0 or 1), or a whole line (end -1), being dragged. */
-private class Grab(val line: Char, val end: Int, val from: Offset)
+internal class Grab(val line: Char, val end: Int, val from: Offset)
 
 /** The lines to start from: across the picture, or for a road running away from the camera. */
 fun presetLines(away: Boolean): Lines = if (away) Lines.away() else Lines.default()
 
+/** The Traffic tab: live counting (once the camera is allowed), or counting a video. */
 @Composable
-fun TrafficScreen() {
+fun TrafficTab() {
+    val app = App.instance
+    var video by rememberSaveable { mutableStateOf<android.net.Uri?>(null) }
+    val request by app.openVideo.collectAsState()
+    LaunchedEffect(request) {
+        request?.takeIf { it.mode == VideoRequest.TRAFFIC }?.let {
+            video = it.uri
+            app.openVideo.value = null
+        }
+    }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> if (uri != null) video = uri }
+    val pick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) }
+    val v = video
+    if (v != null) {
+        VideoCountScreen(v, onClose = { video = null })
+        return
+    }
+    CameraGate(extra = { OutlinedButton(onClick = pick) { Text("Count traffic in a video instead") } }) { TrafficScreen(onVideo = pick) }
+}
+
+@Composable
+fun TrafficScreen(onVideo: () -> Unit = {}) {
     val app = App.instance
     val prefs = app.prefs
     val context = LocalContext.current
@@ -380,6 +408,14 @@ fun TrafficScreen() {
                                     },
                                 )
                                 DropdownMenuItem(
+                                    text = { Text("Count traffic in a video") },
+                                    enabled = !ui.running && !editing,
+                                    onClick = {
+                                        menu = false
+                                        onVideo()
+                                    },
+                                )
+                                DropdownMenuItem(
                                     text = { Text("Keep counting with the screen off") },
                                     leadingIcon = { Checkbox(checked = prefs.backgroundCounting, onCheckedChange = null) },
                                     enabled = !ui.running,
@@ -490,7 +526,7 @@ private fun batteryLevel(context: android.content.Context): Pair<Int, Boolean>? 
     if (level < 0 || level > 100) null else level to bm.isCharging
 }.getOrNull()
 
-private fun clock(ms: Long): String {
+internal fun clock(ms: Long): String {
     val secs = max(0L, ms / 1000)
     return "%d:%02d:%02d".format(secs / 3600, secs / 60 % 60, secs % 60)
 }
@@ -534,7 +570,7 @@ private fun ColumnScope.CountsPanel(ui: TrafficUi, now: Long) {
 }
 
 @Composable
-private fun CountRow(label: String, a: String, b: String, total: String, header: Boolean = false) {
+internal fun CountRow(label: String, a: String, b: String, total: String, header: Boolean = false) {
     val color = if (header) C.muted else C.text
     val size = if (header) 12.sp else 14.5.sp
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -546,7 +582,7 @@ private fun CountRow(label: String, a: String, b: String, total: String, header:
 }
 
 @Composable
-private fun ColumnScope.SetupForm(
+internal fun ColumnScope.SetupForm(
     away: Boolean,
     onAway: (Boolean) -> Unit,
     zoomSteps: List<Float>,
@@ -659,7 +695,7 @@ private fun DimScreen(ui: TrafficUi, now: Long, battery: Pair<Int, Boolean>?, on
 }
 
 /** The line end or line under the finger (ends first), or null. */
-private fun pick(lines: Lines, p: Offset, r: VideoRect, endReach: Float, lineReach: Float): Grab? {
+internal fun pick(lines: Lines, p: Offset, r: VideoRect, endReach: Float, lineReach: Float): Grab? {
     val fx = (p.x - r.x) / r.w
     val fy = (p.y - r.y) / r.h
     var best: Grab? = null
@@ -692,7 +728,7 @@ private fun pick(lines: Lines, p: Offset, r: VideoRect, endReach: Float, lineRea
 }
 
 /** The lines with the grabbed end (or line) moved to follow the finger at `p`, kept inside the picture. */
-private fun moved(start: Lines, g: Grab, p: Offset, r: VideoRect): Lines {
+internal fun moved(start: Lines, g: Grab, p: Offset, r: VideoRect): Lines {
     val fx = ((p.x - r.x) / r.w).toDouble()
     val fy = ((p.y - r.y) / r.h).toDouble()
     val o = if (g.line == 'a') start.a else start.b
@@ -713,7 +749,7 @@ private fun moved(start: Lines, g: Grab, p: Offset, r: VideoRect): Lines {
 
 /** The picture's overlay: the analysed area, road users (counted ones in green), the two lines and their distance. */
 @Composable
-private fun TrafficOverlay(ui: TrafficUi, lines: Lines, distanceM: Double, editing: Boolean, aspect: Double, roi: DoubleArray, debug: Boolean, modifier: Modifier) {
+internal fun TrafficOverlay(ui: TrafficUi, lines: Lines, distanceM: Double, editing: Boolean, aspect: Double, roi: DoubleArray, debug: Boolean, modifier: Modifier) {
     Canvas(modifier) {
         val r = videoRect(size.width, size.height, aspect)
         fun x(v: Double) = r.x + (v * r.w).toFloat()

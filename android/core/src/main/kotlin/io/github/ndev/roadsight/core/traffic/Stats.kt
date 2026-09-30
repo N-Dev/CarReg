@@ -55,6 +55,51 @@ class Summary(
 /** A counted road user as stored: time in epoch ms. */
 data class Event(val t: Long, val kind: String, val dir: Int, val speed: Double?, val length: Double?)
 
+/** One counting session, for figures across several: when it ran and what it counted. */
+class Counted(val from: Long, val to: Long, val events: List<Event>)
+
+/** One day of a survey over several days. */
+class DayRow(
+    val date: java.time.LocalDate,
+    /** Hours counted that day. */
+    val hours: Double,
+    /** kind -> [total, direction 1, direction 2] */
+    val totals: Map<String, IntArray>,
+    val motor: Int,
+    val speeds: SpeedStats,
+) {
+    /** Motor vehicles an hour counted, or null for under a quarter of an hour. */
+    val perHour: Double? get() = if (hours >= 0.25) floor(motor / hours * 10 + 0.5) / 10 else null
+}
+
+/** One hour of the day (07:00 to 08:00, say) over every day counted: how long it was counted, and what passed. */
+class HourOfDay(val hour: Int) {
+    var hours = 0.0
+    var motor = 0
+    val dirs = intArrayOf(0, 0, 0)
+
+    /** Motor vehicles an hour on average, or null if this hour was counted for under a quarter of an hour. */
+    val perHour: Double? get() = if (hours >= 0.25) motor / hours else null
+    fun perHourDir(d: Int): Double = if (hours >= 0.25) dirs[d] / hours else 0.0
+}
+
+/** Figures for a survey made of several sessions (usually on different days at one site). */
+class DaysSummary(
+    /** Over every road user counted: totals, speeds and the speed histogram (its hours and hourly figures span the gaps; use the ones below). */
+    val all: Summary,
+    val sessions: Int,
+    val from: Long,
+    val to: Long,
+    /** Time actually counted, in hours. */
+    val hours: Double,
+    val perHourAvg: Double,
+    val days: List<DayRow>,
+    /** Hours of the day 0 to 23. */
+    val profile: List<HourOfDay>,
+    /** The busiest hour of the day, on average. */
+    val peak: HourOfDay?,
+)
+
 object Stats {
     private const val HOUR = 3_600_000L
 
@@ -159,6 +204,61 @@ object Stats {
             speeds2 = speedStats(motorSpeeds(2), limit),
             bikeSpeeds = speedStats(events.filter { it.kind == "bicycle" }.map { it.speed }, limit),
             histogram = histogram(motorSpeeds(null).filterNotNull()),
+        )
+    }
+
+    /**
+     * Figures across several sessions: day by day, and by hour of the day averaged over the time actually
+     * counted (so a day counted from 7 to 10 and another from 7 to 19 give a fair picture of each hour).
+     */
+    fun summarizeDays(sessions: List<Counted>, limit: Int = 50, zone: ZoneId = ZoneId.systemDefault()): DaysSummary {
+        val events = sessions.flatMap { it.events }.sortedBy { it.t }
+        val from = sessions.minOfOrNull { it.from } ?: events.firstOrNull()?.t ?: System.currentTimeMillis()
+        val to = maxOf(sessions.maxOfOrNull { it.to } ?: from, events.lastOrNull()?.t ?: from)
+        val all = summarize(events, from, to, limit, zone)
+        val profile = List(24) { HourOfDay(it) }
+        val dayHours = java.util.TreeMap<java.time.LocalDate, Double>()
+        // Time counted, split at each clock hour.
+        for (c in sessions) {
+            var a = c.from
+            val end = maxOf(c.to, c.events.maxOfOrNull { it.t } ?: c.to)
+            while (a < end) {
+                val b = minOf(end, hourStart(a, zone) + HOUR)
+                val z = Instant.ofEpochMilli(a).atZone(zone)
+                val h = (b - a).toDouble() / HOUR
+                profile[z.hour].hours += h
+                dayHours[z.toLocalDate()] = (dayHours[z.toLocalDate()] ?: 0.0) + h
+                a = b
+            }
+        }
+        val byDay = events.groupBy { Instant.ofEpochMilli(it.t).atZone(zone).toLocalDate() }
+        for (e in events) {
+            if (!Kinds.isMotor(e.kind)) continue
+            val p = profile[Instant.ofEpochMilli(e.t).atZone(zone).hour]
+            p.motor++
+            p.dirs[e.dir]++
+        }
+        val days = (dayHours.keys + byDay.keys).toSortedSet().map { d ->
+            val ev = byDay[d] ?: emptyList()
+            val totals = LinkedHashMap<String, IntArray>().also { m -> for (k in Kinds.ORDER) m[k] = IntArray(3) }
+            for (e in ev) totals[e.kind]?.let { it[0]++; it[e.dir]++ }
+            DayRow(
+                d, round((dayHours[d] ?: 0.0) * 100) / 100, totals, ev.count { Kinds.isMotor(it.kind) },
+                speedStats(ev.filter { Kinds.isMotor(it.kind) }.map { it.speed }, limit),
+            )
+        }
+        val hours = maxOf(profile.sumOf { it.hours }, 1.0 / 60)
+        val peak = profile.filter { it.perHour != null && it.motor > 0 }.maxByOrNull { it.perHour!! }
+        return DaysSummary(
+            all = all,
+            sessions = sessions.size,
+            from = from,
+            to = to,
+            hours = round(hours * 100) / 100,
+            perHourAvg = round(all.motor / hours * 10) / 10,
+            days = days,
+            profile = profile,
+            peak = peak,
         )
     }
 

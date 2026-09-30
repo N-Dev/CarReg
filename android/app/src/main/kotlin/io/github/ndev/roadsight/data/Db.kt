@@ -40,6 +40,8 @@ class SessionRow(
     val lines: Lines,
     val model: String,
     val vehicles: Int,
+    /** "live" (the camera) or "video" (a recording). */
+    val source: String = "live",
 )
 
 /** A plate on the watchlist (mode "watch": tell me when it's seen) or ignored ("ignore": one of my cars). */
@@ -54,7 +56,7 @@ class WatchRow(
 )
 
 /** Everything the app keeps, on the phone only: plate history, traffic counts and the watchlist. No images of traffic. */
-class Db(context: Context) : SQLiteOpenHelper(context, NAME, null, 2) {
+class Db(context: Context) : SQLiteOpenHelper(context, NAME, null, 3) {
     companion object {
         const val NAME = "roadsight.db"
     }
@@ -66,7 +68,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, NAME, null, 2) {
         )
         db.execSQL(
             "CREATE TABLE sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, site TEXT, started INTEGER, ended INTEGER, " +
-                "distance REAL, speed_limit INTEGER, dir1 TEXT, dir2 TEXT, lines TEXT, model TEXT)",
+                "distance REAL, speed_limit INTEGER, dir1 TEXT, dir2 TEXT, lines TEXT, model TEXT, source TEXT DEFAULT 'live')",
         )
         db.execSQL("CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, session INTEGER, t INTEGER, kind TEXT, dir INTEGER, speed REAL, length REAL)")
         db.execSQL("CREATE INDEX events_session ON events(session)")
@@ -79,6 +81,8 @@ class Db(context: Context) : SQLiteOpenHelper(context, NAME, null, 2) {
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
         if (oldVersion < 2) createWatch(db)
+        // Version 3: counting sessions say whether they came from the camera or a video.
+        if (oldVersion < 3) db.execSQL("ALTER TABLE sessions ADD COLUMN source TEXT DEFAULT 'live'")
     }
 
     // ---------------------------------------------------------------- watchlist
@@ -204,8 +208,9 @@ class Db(context: Context) : SQLiteOpenHelper(context, NAME, null, 2) {
     }
 
     // ---------------------------------------------------------------- traffic
-    fun newSession(site: String, started: Long, distanceM: Double, limit: Int, dir1: String, dir2: String, lines: Lines, model: String): Long {
+    fun newSession(site: String, started: Long, distanceM: Double, limit: Int, dir1: String, dir2: String, lines: Lines, model: String, source: String = "live"): Long {
         val v = ContentValues()
+        v.put("source", source)
         v.put("site", site)
         v.put("started", started)
         v.put("ended", started)
@@ -258,7 +263,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, NAME, null, 2) {
     fun sessions(): List<SessionRow> =
         readableDatabase.rawQuery(
             "SELECT s.id, s.site, s.started, s.ended, s.distance, s.speed_limit, s.dir1, s.dir2, s.lines, s.model, " +
-                "(SELECT COUNT(*) FROM events e WHERE e.session = s.id AND e.kind IN $motorKinds) FROM sessions s ORDER BY s.started DESC",
+                "(SELECT COUNT(*) FROM events e WHERE e.session = s.id AND e.kind IN $motorKinds), s.source FROM sessions s ORDER BY s.started DESC",
             null,
         ).use { c ->
             val out = ArrayList<SessionRow>()
@@ -267,6 +272,7 @@ class Db(context: Context) : SQLiteOpenHelper(context, NAME, null, 2) {
                     SessionRow(
                         c.getLong(0), c.getString(1) ?: "", c.getLong(2), c.getLong(3), c.getDouble(4), c.getInt(5),
                         c.getString(6) ?: "Direction 1", c.getString(7) ?: "Direction 2", linesOf(c.getString(8)), c.getString(9) ?: "", c.getInt(10),
+                        c.getString(11) ?: "live",
                     ),
                 )
             }

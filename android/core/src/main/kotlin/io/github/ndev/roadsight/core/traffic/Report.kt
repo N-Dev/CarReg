@@ -21,6 +21,8 @@ class ReportSession(
     val distanceM: Double,
     val limit: Int,
     val dirNames: List<String>,
+    /** Counted from a video recording rather than live. */
+    val fromVideo: Boolean = false,
 )
 
 /**
@@ -111,27 +113,166 @@ object Report {
     ): ByteArray {
         val pdf = Pdf("Traffic survey – ${session.site.ifEmpty { "untitled site" }}", appName, appName)
         val dirNames = session.dirNames.takeIf { it.size >= 2 } ?: listOf("Direction 1", "Direction 2")
-        val right = Pdf.W - M
-        var y = M + 20
-        pdf.text(M, y, "Traffic survey", size = 22.0, bold = true)
-        y += 22
-        pdf.text(M, y, session.site.ifEmpty { "Untitled site" }, size = 13.0, bold = true, color = INK)
-        y += 16
-        pdf.text(M, y, "${period(s.from, s.to, zone)} · ${duration(s.hours)} of counting", size = 9.5, color = INK2)
-        y += 26
+        var y = header(pdf, session.site, "${period(s.from, s.to, zone)} · ${duration(s.hours)} of counting")
 
         // Key figures.
         val sp = s.speedsAll
-        val tiles = listOf(
-            Triple("Motor vehicles", fmt(s.motor), rate(s)),
-            Triple("Busiest hour", s.peak?.let { fmt(it.motor) } ?: "–", s.peak?.let { hourRange(it.start, zone) } ?: "no vehicles"),
-            Triple(
-                "85% drove at or under",
-                if (sp.n > 0) "${jsRound(sp.p85)} km/h" else "–",
-                if (sp.n > 0) "from ${fmt(sp.n)} speeds measured" else "no speeds measured",
+        y = tiles(
+            pdf, y,
+            listOf(
+                Triple("Motor vehicles", fmt(s.motor), rate(s)),
+                Triple("Busiest hour", s.peak?.let { fmt(it.motor) } ?: "–", s.peak?.let { hourRange(it.start, zone) } ?: "no vehicles"),
+                p85Tile(sp),
+                overTile(s),
             ),
-            Triple("Over the ${s.limit} km/h limit", if (sp.n > 0) "${Stats.fmt1(sp.overPct)}%" else "–", if (sp.n > 0) "${fmt(sp.over)} vehicle${if (sp.over == 1) "" else "s"}" else ""),
         )
+        y = countsAndSpeeds(pdf, y, s, dirNames)
+
+        // Vehicles per hour, stacked by direction.
+        pdf.text(M, y, "Motor vehicles per hour", size = 11.0, bold = true)
+        legend(pdf, Pdf.W - M, y, listOf(DIR[0] to dirNames[0], DIR[1] to dirNames[1]))
+        y += 12
+        y = hourChart(pdf, M, y, Pdf.W - 2 * M, 118.0, s.perHour, zone) + 18
+
+        y = speedSection(pdf, y, s)
+        note(pdf, y, method(appName, listOf(session)))
+        footer(pdf, appName, release, build, now, zone)
+        return pdf.bytes()
+    }
+
+    /**
+     * A report across several sessions (usually one site on several days): day by day, an average day
+     * hour by hour, and the counts and speeds over them all. Two pages.
+     */
+    fun days(
+        sessions: List<ReportSession>,
+        d: DaysSummary,
+        appName: String = "RoadSight",
+        release: String = "",
+        build: String = "",
+        now: Long = System.currentTimeMillis(),
+        zone: ZoneId = ZoneId.systemDefault(),
+    ): ByteArray {
+        val sites = sessions.map { it.site.trim() }.filter { it.isNotEmpty() }.distinct()
+        val site = when (sites.size) {
+            0 -> ""
+            1 -> sites[0]
+            else -> sites.joinToString(" · ")
+        }
+        val pdf = Pdf("Traffic survey – ${site.ifEmpty { "untitled site" }}", appName, appName)
+        // Directions: the sessions' own names when they agree, else A to B and B to A.
+        val names = sessions.map { it.dirNames }.distinct()
+        val dirNames = names.singleOrNull()?.takeIf { it.size >= 2 } ?: listOf("A to B", "B to A")
+        val s = d.all
+        val right = Pdf.W - M
+        val span = "${dayText(d.from, zone)} to ${dayText(d.to, zone)}"
+        var y = header(pdf, site, "$span · ${d.sessions} session${if (d.sessions == 1) "" else "s"}, ${duration(d.hours)} of counting")
+
+        val sp = s.speedsAll
+        y = tiles(
+            pdf, y,
+            listOf(
+                Triple("Motor vehicles", fmt(s.motor), if (d.hours >= 0.5) "${fmt(d.perHourAvg)} an hour on average" else "in ${duration(d.hours)}"),
+                Triple(
+                    "Busiest time of day",
+                    d.peak?.let { "${pad(it.hour)}:00" } ?: "–",
+                    d.peak?.let { "${fmt(jsRound(it.perHour!! * 10) / 10.0)} an hour on average" } ?: "no vehicles",
+                ),
+                p85Tile(sp),
+                overTile(s),
+            ),
+        )
+
+        // Day by day.
+        pdf.text(M, y, "Day by day", size = 11.0, bold = true)
+        y += 18
+        val w = Pdf.W - 2 * M
+        val xs = doubleArrayOf(M, M + w * 0.34, M + w * 0.46, M + w * 0.58, M + w * 0.69, M + w * 0.8, M + w * 0.9, right)
+        val heads = listOf("Day", "Counted", "Motor vehicles", "An hour", "Bicycles", "People", "85% km/h", "Over ${s.limit}")
+        y += 9
+        heads.forEachIndexed { i, h ->
+            val lines = wrap2(h, if (i > 0) w * 0.1 else 200.0, 8.0)
+            lines.forEachIndexed { k, l ->
+                pdf.text(xs[i], y - (lines.size - 1 - k) * 9, l, size = 8.0, color = INK2, bold = true, align = if (i > 0) Align.RIGHT else Align.LEFT)
+            }
+        }
+        y += 6
+        pdf.line(M, y, right, y, color = AXIS, width = 0.5)
+        y += 12
+        for (r in d.days) {
+            val cells = listOf(
+                dayText(r.date.atStartOfDay(zone).toInstant().toEpochMilli(), zone),
+                duration(r.hours),
+                fmt(r.motor),
+                r.perHour?.let { fmt(it) } ?: "–",
+                fmt(r.totals["bicycle"]?.get(0) ?: 0),
+                fmt(r.totals["person"]?.get(0) ?: 0),
+                if (r.speeds.n > 0) Stats.fmt1(r.speeds.p85) else "–",
+                if (r.speeds.n > 0) "${Stats.fmt1(r.speeds.overPct)}%" else "–",
+            )
+            cells.forEachIndexed { i, c -> pdf.text(xs[i], y, c, size = 9.0, align = if (i > 0) Align.RIGHT else Align.LEFT, bold = i == 2) }
+            y += 14
+            if (y > Pdf.H - 330) {
+                pdf.text(M, y, "…and ${d.days.size - d.days.indexOf(r) - 1} more days (in the CSV)", size = 8.0, color = MUTED)
+                y += 14
+                break
+            }
+        }
+        pdf.line(M, y - 9, right, y - 9, color = GRID, width = 0.5)
+        y += 14
+
+        // An average day, hour by hour.
+        pdf.text(M, y, "Motor vehicles an hour, by time of day", size = 11.0, bold = true)
+        legend(pdf, right, y, listOf(DIR[0] to dirNames[0], DIR[1] to dirNames[1]))
+        y += 10
+        pdf.text(M, y, "Averaged over the time counted in each hour; blank hours weren’t counted.", size = 7.5, color = MUTED)
+        y += 10
+        y = profileChart(pdf, M, y, w, 130.0, d.profile) + 12
+        footer(pdf, appName, release, build, now, zone)
+
+        // Page 2: the counts, the speeds and how it was measured.
+        pdf.addPage()
+        y = M + 20
+        pdf.text(M, y, "Traffic survey", size = 13.0, bold = true)
+        pdf.text(right, y, "${site.ifEmpty { "Untitled site" }} · $span", size = 9.0, color = INK2, align = Align.RIGHT)
+        y += 28
+        y = countsAndSpeeds(pdf, y, s, dirNames)
+        y = speedSection(pdf, y, s)
+        note(pdf, y, method(appName, sessions))
+        footer(pdf, appName, release, build, now, zone)
+        return pdf.bytes()
+    }
+
+    /** "Tue 29 Sep" */
+    private fun dayText(t: Long, zone: ZoneId): String {
+        val d = at(t, zone)
+        return "${DAYS[d.dayOfWeek.value - 1]} ${d.dayOfMonth} ${MONTHS[d.monthValue - 1]}"
+    }
+
+    private fun header(pdf: Pdf, site: String, sub: String): Double {
+        var y = M + 20
+        pdf.text(M, y, "Traffic survey", size = 22.0, bold = true)
+        y += 22
+        pdf.text(M, y, site.ifEmpty { "Untitled site" }, size = 13.0, bold = true, color = INK)
+        y += 16
+        pdf.text(M, y, sub, size = 9.5, color = INK2)
+        y += 26
+        return y
+    }
+
+    private fun p85Tile(sp: SpeedStats) = Triple(
+        "85% drove at or under",
+        if (sp.n > 0) "${jsRound(sp.p85)} km/h" else "–",
+        if (sp.n > 0) "from ${fmt(sp.n)} speeds measured" else "no speeds measured",
+    )
+
+    private fun overTile(s: Summary): Triple<String, String, String> {
+        val sp = s.speedsAll
+        return Triple("Over the ${s.limit} km/h limit", if (sp.n > 0) "${Stats.fmt1(sp.overPct)}%" else "–", if (sp.n > 0) "${fmt(sp.over)} vehicle${if (sp.over == 1) "" else "s"}" else "")
+    }
+
+    private fun tiles(pdf: Pdf, top: Double, tiles: List<Triple<String, String, String>>): Double {
+        var y = top
         val tw = (Pdf.W - 2 * M) / tiles.size
         tiles.forEachIndexed { i, (label, value, sub) ->
             val x = M + i * tw
@@ -140,10 +281,15 @@ object Report {
             pdf.text(x, y + 36, sub, size = 8.0, color = MUTED)
         }
         y += 58
-        pdf.line(M, y, right, y, color = GRID, width = 0.75)
+        pdf.line(M, y, Pdf.W - M, y, color = GRID, width = 0.75)
         y += 22
+        return y
+    }
 
-        // Counts (left) and speeds (right).
+    /** Road users counted (left) and the speeds of motor vehicles (right). */
+    private fun countsAndSpeeds(pdf: Pdf, top0: Double, s: Summary, dirNames: List<String>): Double {
+        var y = top0
+        val right = Pdf.W - M
         val colW = (Pdf.W - 2 * M - 24) / 2
         val top = y
         pdf.text(M, y, "Road users counted", size = 11.0, bold = true)
@@ -211,31 +357,47 @@ object Report {
         y = max(leftEnd, y) + 20
         pdf.line(M, y - 8, right, y - 8, color = GRID, width = 0.75)
         y += 8
+        return y
+    }
 
-        // Vehicles per hour, stacked by direction.
-        pdf.text(M, y, "Motor vehicles per hour", size = 11.0, bold = true)
-        legend(pdf, right, y, listOf(DIR[0] to dirNames[0], DIR[1] to dirNames[1]))
-        y += 12
-        y = hourChart(pdf, M, y, Pdf.W - 2 * M, 118.0, s.perHour, zone) + 18
-
-        // Speed distribution.
+    /** The speed distribution chart with its title and legend. */
+    private fun speedSection(pdf: Pdf, top: Double, s: Summary): Double {
+        var y = top
         pdf.text(M, y, "How fast motor vehicles went", size = 11.0, bold = true)
-        legend(pdf, right, y, listOf(WITHIN to "Within ${s.limit} km/h", OVER to "Over ${s.limit} km/h"))
+        legend(pdf, Pdf.W - M, y, listOf(WITHIN to "Within ${s.limit} km/h", OVER to "Over ${s.limit} km/h"))
         y += 12
         y = speedChart(pdf, M, y, Pdf.W - 2 * M, 104.0, s) + 16
+        return y
+    }
 
-        // How it was measured.
-        val note = "How this was measured: road users were counted automatically by $appName, an app running on a phone " +
-            "camera that analyses the picture on the phone itself. No images, video or number plates were recorded or kept. " +
+    /** How it was measured: the same words as the web app for a live count; a video count says so. */
+    fun method(appName: String, sessions: List<ReportSession>): String {
+        val distances = sessions.map { it.distanceM }.distinct().sorted()
+        val dist = if (distances.size <= 1) "${Stats.fmt1(distances.firstOrNull() ?: 20.0)} m" else "${Stats.fmt1(distances.first())} to ${Stats.fmt1(distances.last())} m"
+        val video = sessions.count { it.fromVideo }
+        val how = when {
+            video == 0 -> "road users were counted automatically by $appName, an app running on a phone " +
+                "camera that analyses the picture on the phone itself. No images, video or number plates were recorded or kept. "
+            video == sessions.size -> "road users were counted automatically by $appName, an app that analysed a video recording " +
+                "on the phone itself. The app kept no images or number plates from it. "
+            else -> "road users were counted automatically by $appName, an app that analyses a phone camera's picture " +
+                "(or, for ${if (video == 1) "one session" else "$video sessions"}, a video recording) on the phone itself. The app kept no images or number plates. "
+        }
+        return "How this was measured: " + how +
             "Each road user is counted once, when it first crosses one of two lines marked across the road; its speed is the " +
-            "${Stats.fmt1(session.distanceM)} m between the lines divided by the time it took, so speeds are estimates that have not been " +
+            "$dist between the lines divided by the time it took, so speeds are estimates that have not been " +
             "checked against a calibrated speed device, and depend on how accurately that distance was measured. Vans and " +
             "lorries are counted together; long vehicles are those measured at ${Stats.fmt1(LONG_VEHICLE_M)} m or more. Vehicles hidden behind others " +
             "can be missed, so counts are a minimum."
-        pdf.paragraph(M, min(y, Pdf.H - 76), note, Pdf.W - 2 * M, size = 7.5, color = INK2, lead = 1.4)
+    }
+
+    private fun note(pdf: Pdf, y: Double, text: String) {
+        pdf.paragraph(M, min(y, Pdf.H - 76), text, Pdf.W - 2 * M, size = 7.5, color = INK2, lead = 1.4)
+    }
+
+    private fun footer(pdf: Pdf, appName: String, release: String, build: String, now: Long, zone: ZoneId) {
         val buildText = if (build.isNotEmpty() && build != "dev") " (build $build)" else ""
         pdf.text(M, Pdf.H - 26, "Generated ${whenText(now, zone)} · $appName $release$buildText", size = 7.0, color = MUTED)
-        return pdf.bytes()
     }
 
     /** Text split over at most two lines of the given width (the second shortened with … if needed). */
@@ -294,6 +456,42 @@ object Report {
             if (i % every == 0) pdf.text(bx + bw / 2, y + h + 11, hh(b.start, zone), size = 7.0, color = MUTED, align = Align.CENTER)
         }
         if (bins.none { it.motor > 0 }) pdf.text(px + pw / 2, y + h / 2, "No motor vehicles counted", size = 9.0, color = MUTED, align = Align.CENTER)
+        pdf.text(px + pw, y + h + 22, "hour of the day", size = 7.0, color = MUTED, align = Align.RIGHT)
+        return y + h + 22
+    }
+
+    /**
+     * An average day: motor vehicles an hour for each hour of the day (averaged over the time counted in
+     * that hour), direction 1 at the bottom. Hours not counted are left blank.
+     */
+    private fun profileChart(pdf: Pdf, x: Double, y: Double, w: Double, h: Double, hours: List<HourOfDay>): Double {
+        val maxV = max(1.0, hours.maxOfOrNull { it.perHour ?: 0.0 } ?: 0.0)
+        val step = niceStep(maxV)
+        val top = ceil(maxV / step) * step
+        val axisW = 28.0
+        val px = x + axisW
+        val pw = w - axisW
+        var v = 0.0
+        while (v <= top) {
+            val gy = y + h - (v / top) * h
+            pdf.line(px, gy, px + pw, gy, color = if (v > 0) GRID else AXIS, width = if (v > 0) 0.4 else 0.6)
+            pdf.text(px - 5, gy + 3, fmt(v), size = 7.0, color = MUTED, align = Align.RIGHT)
+            v += step
+        }
+        val slot = pw / 24
+        val bw = min(18.0, max(1.5, slot - 2))
+        for (b in hours) {
+            val bx = px + b.hour * slot + (slot - bw) / 2
+            if (b.perHour != null) {
+                val h1 = b.perHourDir(1) / top * h
+                val h2 = b.perHourDir(2) / top * h
+                val gap = if (h1 > 0 && h2 > 0) 1.5 else 0.0
+                if (h1 > 0) pdf.column(bx, y + h - h1, bw, h1, DIR[0], if (h2 > 0) 0.0 else 2.0)
+                if (h2 > 0) pdf.column(bx, y + h - h1 - gap - h2, bw, h2, DIR[1], 2.0)
+            }
+            if (b.hour % 2 == 0) pdf.text(bx + bw / 2, y + h + 11, pad(b.hour), size = 7.0, color = MUTED, align = Align.CENTER)
+        }
+        if (hours.none { it.motor > 0 }) pdf.text(px + pw / 2, y + h / 2, "No motor vehicles counted", size = 9.0, color = MUTED, align = Align.CENTER)
         pdf.text(px + pw, y + h + 22, "hour of the day", size = 7.0, color = MUTED, align = Align.RIGHT)
         return y + h + 22
     }

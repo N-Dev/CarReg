@@ -19,6 +19,7 @@ import io.github.ndev.roadsight.data.Updates
 import io.github.ndev.roadsight.plates.PlateScanner
 import io.github.ndev.roadsight.plates.Watchlist
 import io.github.ndev.roadsight.traffic.TrafficCounter
+import io.github.ndev.roadsight.video.VideoRequest
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -47,6 +48,15 @@ class App : Application() {
 
     /** A photo shared to the app ("Share → RoadSight"), waiting to be read. */
     val sharedPhoto = MutableStateFlow<Uri?>(null)
+
+    /** A video shared to the app, waiting for "read plates or count traffic?". */
+    val sharedVideo = MutableStateFlow<Uri?>(null)
+
+    /** A video to open in the Plates or Traffic tab. */
+    val openVideo = MutableStateFlow<VideoRequest?>(null)
+
+    /** A video screen is open (the Traffic tab then doesn't keep to its lines' way round). */
+    val videoScreen = MutableStateFlow(false)
 
     /** A counting session to show in History (after "See results"). */
     val openSession = MutableStateFlow<Long?>(null)

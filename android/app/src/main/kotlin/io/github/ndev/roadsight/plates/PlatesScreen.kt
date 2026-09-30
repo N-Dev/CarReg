@@ -70,6 +70,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.ndev.roadsight.App
 import io.github.ndev.roadsight.CameraGate
+import io.github.ndev.roadsight.video.VideoPlatesScreen
+import io.github.ndev.roadsight.video.VideoRequest
 import io.github.ndev.roadsight.ai.Model
 import io.github.ndev.roadsight.debug.DebugStrip
 import io.github.ndev.roadsight.debug.enginesText
@@ -103,6 +105,16 @@ fun PlatesScreen() {
     }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> if (uri != null) photo = uri }
     var lists by rememberSaveable { mutableStateOf(false) }
+    var video by rememberSaveable { mutableStateOf<android.net.Uri?>(null) }
+    val request by app.openVideo.collectAsState()
+    LaunchedEffect(request) {
+        request?.takeIf { it.mode == VideoRequest.PLATES }?.let {
+            video = it.uri
+            app.openVideo.value = null
+        }
+    }
+    val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> if (uri != null) video = uri }
+    val pickVideo = { videoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)) }
 
     val current = photo
     if (current != null) {
@@ -113,22 +125,31 @@ fun PlatesScreen() {
         WatchlistScreen(onClose = { lists = false })
         return
     }
-    // Photos can be read without the camera.
+    val v = video
+    if (v != null) {
+        VideoPlatesScreen(v, onClose = { video = null })
+        return
+    }
+    // Photos and videos can be read without the camera.
     CameraGate(extra = {
-        OutlinedButton(onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
-            Text("Read a photo instead")
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            OutlinedButton(onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
+                Text("Read a photo instead")
+            }
+            OutlinedButton(onClick = pickVideo, modifier = Modifier.padding(top = 8.dp)) { Text("Read a video") }
         }
     }) {
         LiveScreen(
             app, ui, notice,
             onPick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
             onLists = { lists = true },
+            onVideo = pickVideo,
         )
     }
 }
 
 @Composable
-private fun LiveScreen(app: App, ui: PlateUi, notice: String?, onPick: () -> Unit, onLists: () -> Unit) {
+private fun LiveScreen(app: App, ui: PlateUi, notice: String?, onPick: () -> Unit, onLists: () -> Unit, onVideo: () -> Unit) {
     val host = app.camera
     val camera by host.camera.collectAsState()
     val zoomInfo by host.zoom.collectAsState()
@@ -244,6 +265,13 @@ private fun LiveScreen(app: App, ui: PlateUi, notice: String?, onPick: () -> Uni
                                     askNotifications()
                                     app.plates.startWatching()
                                 }
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Read plates in a video") },
+                            onClick = {
+                                menu = false
+                                onVideo()
                             },
                         )
                         DropdownMenuItem(

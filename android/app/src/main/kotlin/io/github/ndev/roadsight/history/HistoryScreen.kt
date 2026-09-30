@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
@@ -67,6 +68,7 @@ import androidx.compose.ui.unit.sp
 import io.github.ndev.roadsight.App
 import io.github.ndev.roadsight.BuildConfig
 import io.github.ndev.roadsight.core.plate.Formats
+import io.github.ndev.roadsight.core.traffic.Counted
 import io.github.ndev.roadsight.core.traffic.Event
 import io.github.ndev.roadsight.core.traffic.Kinds
 import io.github.ndev.roadsight.core.traffic.LONG_VEHICLE_M
@@ -327,46 +329,151 @@ private fun CountsHistory(onOpen: (Long) -> Unit) {
         value = withContext(Dispatchers.IO) { runCatching { app.db.sessions() }.getOrDefault(emptyList()) }
     }
     var confirmClear by remember { mutableStateOf(false) }
+    // Choosing sessions for one report across them (several days at one site, say).
+    var choosing by rememberSaveable { mutableStateOf(false) }
+    var chosen by rememberSaveable { mutableStateOf(listOf<Long>()) }
+    var export by remember { mutableStateOf<Pair<String, ByteArray>?>(null) }
+    var making by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    BackHandler(enabled = choosing) { choosing = false }
     val list = sessions
     if (list == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = C.mint) }
         return
     }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)) {
-        if (list.isEmpty()) {
-            item {
-                Empty(
-                    "No counts yet",
-                    "Set up the lines on the Traffic tab, then tap Start counting. Each counting session is saved here, with its charts, a CSV and a report for the council.",
-                )
-            }
-        }
-        items(list, key = { it.id }) { s ->
-            val counting = live.running && live.sessionId == s.id
-            Row(
-                Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(14.dp)).background(C.surface).border(1.dp, C.line, RoundedCornerShape(14.dp))
-                    .clickable { onOpen(s.id) }.padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(s.site.ifEmpty { "Untitled site" }, color = C.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    val mins = maxOf(1L, Math.round((s.ended - s.started) / 60000.0))
-                    val dur = if (mins >= 60) "${mins / 60} h ${(mins % 60).toString().padStart(2, '0')}" else "$mins min"
-                    Text("${Report.whenText(s.started)} · $dur${if (counting) " · counting now" else ""}", color = if (counting) C.mint else C.muted, fontSize = 12.5.sp)
-                }
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(Report.fmt(s.vehicles), color = C.text, fontSize = 18.sp, fontWeight = FontWeight.Bold, style = TNUM)
-                    Text("vehicles", color = C.muted, fontSize = 11.sp)
-                }
-            }
-        }
-        if (list.isNotEmpty()) {
-            item {
-                TextButton(onClick = { confirmClear = true }, enabled = !live.running, modifier = Modifier.padding(top = 12.dp)) {
-                    Text("Delete all counts", color = C.red)
+
+    fun make(pdf: Boolean) {
+        val picked = list.filter { it.id in chosen }.sortedBy { it.started }
+        if (picked.isEmpty()) return
+        making = true
+        scope.launch {
+            val r = withContext(Dispatchers.IO) {
+                runCatching {
+                    val loaded = picked.map { s -> s to app.db.events(s.id) }
+                    val first = picked.first()
+                    val base = Report.baseName(first.site, first.started) + if (picked.size > 1) "-to-" + java.time.Instant.ofEpochMilli(picked.last().started).atZone(java.time.ZoneId.systemDefault()).toLocalDate() else ""
+                    if (pdf) {
+                        val days = Stats.summarizeDays(loaded.map { (s, ev) -> Counted(s.started, s.ended, ev) }, first.limit)
+                        val bytes = Report.days(
+                            picked.map { ReportSession(it.site, it.distanceM, it.limit, listOf(it.dir1, it.dir2), fromVideo = it.source == "video") }, days,
+                            appName = "RoadSight", release = BuildConfig.VERSION_NAME, build = BuildConfig.VERSION_CODE.toString(),
+                        )
+                        "$base.pdf" to bytes
+                    } else {
+                        // One CSV: every session's rows, with its site on each.
+                        val sb = StringBuilder()
+                        loaded.forEachIndexed { i, (s, ev) ->
+                            val csv = Stats.toCSV(ev, listOf(s.dir1, s.dir2), s.site)
+                            sb.append(if (i == 0) csv else csv.substringAfter("\r\n"))
+                        }
+                        "$base.csv" to sb.toString().toByteArray()
+                    }
                 }
             }
+            making = false
+            r.onSuccess { export = it }
         }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)) {
+            if (list.isEmpty()) {
+                item {
+                    Empty(
+                        "No counts yet",
+                        "Set up the lines on the Traffic tab, then tap Start counting (or count a video from its menu). Each counting session is saved here, with its charts, a CSV and a report for the council.",
+                    )
+                }
+            }
+            if (list.size >= 2) {
+                item {
+                    if (!choosing) {
+                        TextButton(onClick = {
+                            choosing = true
+                            // Start with every session at the newest one's site.
+                            chosen = list.filter { it.site == list.first().site }.map { it.id }
+                        }) { Text("One report for several sessions…", color = C.mint) }
+                    } else {
+                        Text(
+                            "Choose the sessions to put in one report: several days at one site, say. It shows each day, an average day hour by hour, and the speeds over them all.",
+                            color = C.muted, fontSize = 12.5.sp, modifier = Modifier.padding(bottom = 6.dp),
+                        )
+                        val sites = list.groupBy { it.site }.filter { it.value.size > 1 }
+                        if (sites.size > 1) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(bottom = 6.dp)) {
+                                for ((site, rows) in sites.entries.take(3)) {
+                                    OutlinedButton(onClick = { chosen = rows.map { it.id } }) {
+                                        Text("All at ${site.ifEmpty { "untitled" }} (${rows.size})", maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            items(list, key = { it.id }) { s ->
+                val counting = live.running && live.sessionId == s.id
+                val on = s.id in chosen
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(14.dp)).background(C.surface)
+                        .border(if (choosing && on) 2.dp else 1.dp, if (choosing && on) C.mint else C.line, RoundedCornerShape(14.dp))
+                        .clickable {
+                            if (choosing) chosen = if (on) chosen - s.id else chosen + s.id else onOpen(s.id)
+                        }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (choosing) {
+                        Checkbox(checked = on, onCheckedChange = null, modifier = Modifier.padding(end = 10.dp))
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(s.site.ifEmpty { "Untitled site" }, color = C.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        val mins = maxOf(1L, Math.round((s.ended - s.started) / 60000.0))
+                        val dur = if (mins >= 60) "${mins / 60} h ${(mins % 60).toString().padStart(2, '0')}" else "$mins min"
+                        Text(
+                            "${Report.whenText(s.started)} · $dur${if (s.source == "video") " · from a video" else ""}${if (counting) " · counting now" else ""}",
+                            color = if (counting) C.mint else C.muted, fontSize = 12.5.sp,
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(Report.fmt(s.vehicles), color = C.text, fontSize = 18.sp, fontWeight = FontWeight.Bold, style = TNUM)
+                        Text("vehicles", color = C.muted, fontSize = 11.sp)
+                    }
+                }
+            }
+            if (list.isNotEmpty() && !choosing) {
+                item {
+                    TextButton(onClick = { confirmClear = true }, enabled = !live.running, modifier = Modifier.padding(top = 12.dp)) {
+                        Text("Delete all counts", color = C.red)
+                    }
+                }
+            }
+            if (choosing) item { Spacer(Modifier.height(120.dp)) }
+        }
+        if (choosing) {
+            Box(Modifier.align(Alignment.BottomCenter)) {
+                Column(Modifier.fillMaxWidth().background(C.surface).padding(horizontal = 16.dp, vertical = 10.dp)) {
+                    Text("${chosen.size} session${if (chosen.size == 1) "" else "s"} chosen", color = C.text, fontSize = 13.sp, modifier = Modifier.padding(bottom = 6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { choosing = false }) { Text("Cancel", color = C.muted) }
+                        OutlinedButton(onClick = { make(false) }, enabled = chosen.isNotEmpty() && !making, modifier = Modifier.weight(1f)) { Text("CSV") }
+                        Button(
+                            onClick = { make(true) }, enabled = chosen.size >= 2 && !making, modifier = Modifier.weight(1.4f),
+                            colors = ButtonDefaults.buttonColors(containerColor = C.mint, contentColor = C.bg),
+                        ) { Text(if (making) "Making…" else "Report (PDF)", fontWeight = FontWeight.Bold) }
+                    }
+                }
+            }
+        }
+    }
+    export?.let { (name, bytes) ->
+        val pdf = name.endsWith(".pdf")
+        ExportDialog(
+            title = if (pdf) "Report across the sessions" else "Traffic counts (CSV)",
+            text = if (pdf) "A two-page PDF: each day, an average day hour by hour, counts by type and direction, speeds, and how they were measured."
+            else "One row per road user counted in the chosen sessions: when, what, which way, speed, length and site.",
+            name = name, mime = if (pdf) "application/pdf" else "text/csv", bytes = bytes, onDismiss = { export = null },
+        )
     }
     if (confirmClear) {
         Confirm("Delete every counting session?", "Their counts, charts and reports go too. This can’t be undone.", "Delete all", onDismiss = { confirmClear = false }) {
@@ -447,7 +554,10 @@ private fun SessionBody(d: Loaded, counting: Boolean, onExport: (Pair<String, By
     val names = listOf(s.dir1, s.dir2)
     val sp = sum.speedsAll
     Text(s.site.ifEmpty { "Untitled site" }, color = C.text, fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 6.dp))
-    Text("${Report.period(sum.from, sum.to)} · lines ${fmtDistance(s.distanceM)} m apart", color = C.muted, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp, bottom = 12.dp))
+    Text(
+        "${Report.period(sum.from, sum.to)} · lines ${fmtDistance(s.distanceM)} m apart${if (s.source == "video") " · counted from a video" else ""}",
+        color = C.muted, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp, bottom = 12.dp),
+    )
 
     val tiles = listOf(
         Triple("Motor vehicles", Report.fmt(sum.motor), Report.rate(sum)),
@@ -513,7 +623,7 @@ private fun SessionBody(d: Loaded, counting: Boolean, onExport: (Pair<String, By
             scope.launch {
                 val bytes = withContext(Dispatchers.Default) {
                     Report.council(
-                        ReportSession(s.site, s.distanceM, s.limit, names), sum,
+                        ReportSession(s.site, s.distanceM, s.limit, names, fromVideo = s.source == "video"), sum,
                         appName = "RoadSight", release = BuildConfig.VERSION_NAME, build = BuildConfig.VERSION_CODE.toString(),
                     )
                 }

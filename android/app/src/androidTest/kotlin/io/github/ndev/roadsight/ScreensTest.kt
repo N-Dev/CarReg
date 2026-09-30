@@ -12,6 +12,7 @@ import android.graphics.Paint
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -29,6 +30,7 @@ import io.github.ndev.roadsight.data.Backup
 import io.github.ndev.roadsight.data.Share
 import io.github.ndev.roadsight.debug.DebugLog
 import io.github.ndev.roadsight.plates.Watchlist
+import io.github.ndev.roadsight.video.VideoRequest
 import io.github.ndev.roadsight.service.BackgroundService
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -365,7 +367,7 @@ class ScreensTest {
             settle()
             Shots.take("21-watchlist")
             compose.onNodeWithContentDescription("Back").performClick()
-            waitForText("Point the camera", substring = true)
+            compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("Read a photo").fetchSemanticsNodes().isNotEmpty() }
         } finally {
             w.remove(key)
             plates.clearTray()
@@ -438,6 +440,47 @@ class ScreensTest {
             db.deleteSession(sid)
             p.site = site
             app.watch.load()
+        }
+    }
+
+    /** Counting a video (set-up, counting, results) and reading the plates in one. */
+    @Test
+    fun videoScreens() {
+        val p = app.prefs
+        val model = p.trafficModel
+        val site = p.site
+        p.trafficModel = "nano"
+        val assets = InstrumentationRegistry.getInstrumentation().context.assets
+        fun staged(name: String) = Share.stage(app, name, assets.open("videos/$name").use { it.readBytes() })
+        try {
+            app.openVideo.value = VideoRequest(staged("traffic.mp4"), VideoRequest.TRAFFIC)
+            waitForText("Count traffic in a video")
+            waitForText("Set up the counting lines")
+            settle()
+            Shots.take("27-video-setup")
+            compose.onNodeWithText("Start counting").performClick()
+            waitForText("Counting… keep this screen open")
+            settle(3000)
+            Shots.take("28-video-counting")
+            waitForText("Done: the whole video is counted", timeoutMs = 240_000)
+            settle()
+            Shots.take("29-video-counted")
+            compose.onNodeWithText("See results").performClick()
+            waitForText("counted from a video", substring = true)
+            settle()
+            Shots.take("30-video-results")
+
+            app.openVideo.value = VideoRequest(staged("plates.mp4"), VideoRequest.PLATES)
+            waitForText("Plates in a video")
+            waitForText("Done:", substring = true, timeoutMs = 240_000)
+            waitForText("241-D-12345")
+            settle()
+            Shots.take("31-video-plates")
+            compose.onNodeWithContentDescription("Back").performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("Read a photo").fetchSemanticsNodes().isNotEmpty() }
+        } finally {
+            p.trafficModel = model
+            p.site = site
         }
     }
 
