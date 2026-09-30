@@ -1,0 +1,92 @@
+
+=== main
+boot 1.8 s {"info": {"threads": 4, "eps": ["wasm"], "source": "site", "tried": [], "runtimeMs": 127, "coi": true, "version": "1.20.1", "safe": false, "requestedThreads": 4, "ep": "wasm"}, "coi": true, "ctrl": true}
+PASS service worker controls page 
+PASS cross-origin isolated (multi-thread capable) 
+PASS real runtime loaded from the site copy version=1.20.1 cdn hits: []
+PASS multi-threaded config threads=4
+PASS live: Irish plate confirmed from camera ['241-D-12345']
+live {"fps": 5.05854599294819, "tier": "fast", "tracks": [{"id": 1, "n": 15, "text": "241-D-12345", "conf": 1}]}
+PASS live detail decodes county/year IRL | BAILE ÁTHA CLIATH | 241-D-12345 | COUNTRY | 🇮🇪 Ireland | FORMAT | Valid Irish | REGISTERED | Jan–Jun 2024 | COUNTY | Dublin · Baile Átha Cliath | CONFIDENCE | 100% | Copy | Share | Done
+PASS photo: both plates read ['241-D-12345', 'AB12 CDE']
+PASS photo: countries recognised 
+PASS back button closes sheet 
+PASS video: both plates found ['241-D-12345', 'AB12 CDE'] | Done · 2 plates in 0:08
+PASS history has both plates ['241-D-12345', 'AB12 CDE'] ['🇮🇪 Ireland · video · 4× · 11:27 PM', '🇬🇧 United Kingdom · video · 2× · 11:27 PM']
+PASS history search ['AB12 CDE']
+PASS CSV export "plate","country","valid_format","confidence","times_seen","first_seen","last_seen","source","registered","county_or_area"
+share POST -> http://127.0.0.1:8765/?shared=1 200
+PASS share target opens photo in app ['AB12 CDE']
+offline boot: {'ready': True, 'err': None} blocked: []
+PASS works fully offline after first launch ['241-D-12345'] blocked=[]
+=== main: 30 s
+
+=== cars
+/home/runner/work/CarReg/CarReg/tests/e2e/run_e2e.py:284: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+  px = list(im.getdata())
+PASS switching cars: two separate plates, each with its own photo {'12-D-15405': (1, 'silver'), '201-D-8573': (1, 'red')}
+=== cars: 16 s
+
+=== debug
+PASS debug: 7 taps on the logo unlock debug mode {'on': True, 'btn': True, 'cls': True} 'You are now a developer! Debug mode is on.\nOpen'
+PASS debug: live overlay data and speed graph {"raw": 1, "region": true, "hud": true, "perf": 20, "text": "5.3 fps \u00b7 174 ms \u00b7 Fast\nfind 154 \u00b7 read 20 ms \u00b7 CPU\u00d74\nstarting fast \u00b7 CPU critical"}
+PASS debug: read inspector shows each character's confidence {"chars": "241D12345", "img": true, "votes": 1}
+PASS field test: mark a reading right Saved as test sample #1. 1 labelled so far, 100% read right.
+Undo
+PASS field test: correct a wrong reading <span>A</span><span>B</span><span>1</span><span>2</span><span>C</span><span>D</span><span class="d-sub" title="read E, r
+PASS debug panel: overview diagnostics LIVE | Fast | Balanced | Sharp | over budget | 100 ms budget | Scanning | no | Quality | Fast (auto) | Why | starting fast | CPU pressure | nominal | Detection threshold | 0.35 | Frames analys
+PASS debug panel: event log All | Engine | Scan | Speed | Data | Errors | +12.1s | DATA | Field test #2: wrong (read AB12CDE, really AB12CDF) | +11.7s | PERF | CPU pressure: nominal | +10.5s | PHOTO | 2 plates in 310
+PASS debug tools: model benchmark BENCHMARK |  | Times each loaded model on this phone with 4 threads. |  | Model	Median	Mean	95%	Best | Plate finder 384	67.1	67.4	70.1	66.2 | Plate finder 640	173	174.7	200
+PASS diagnostics: speed per quality tier and the benchmark are copied 'Diagnostics copied' speed={"spanMin": 0.1, "frames": 35, "setups": {"cpu-4t": {"fast": {"frames": 35, "idleFrames": 0, "active": 193, "activeP95": 288, "finder": {"det384": 168}, "readerPerPlate": {"ocrFast": 23}, "platesPerActiveFrame": 1}}}, "timeline": [{"min": 0, "setup": "cpu-4t", "frames": 35, "tier": "fast", "active": bench=[{"key": "det384", "mean": 67.4, "p50": 67.1, "p95": 70.1, "min": 66.2}, {"key": "det640", "mean": 174.7, "p50": 173, "p 'PlateSight diagnostics · 2026-09-30T23:27:58.613Z\n{\n  "app": {\n    "release": "2'
+PASS accuracy: 2 plates tested, 1 right 2 | plates tested | 50% | read exactly right | 94% | characters right | live 1/1 | photo 0/1 | CONFIDENCE THRESHOLD | 0% | 50% | 100% | 0 | 25 | 50 | 75 | 95 | right, of plates reported | plates still reported | x: minimum confidence % |  | L
+PASS training set: valid zip in the plate reader's training format ['platesight-dataset-20260930-2327/train/images/00001.jpg', 'platesight-dataset-20260930-2327/train/images/00002.jpg', 'platesight-dataset-20260930-2327/train/annotations.csv', 'platesight-dataset-20260930-2327/val/annotations.csv', 'platesight-dataset-20260930-2327/predictions.csv', 'platesight-dataset-20260930-2327/README.txt'] | 'image_path,plate_text,plate_region\nimages/00001.jpg,241D12345,Ireland\nimages/00002.jpg,AB12CDF,United Kingdom\n'
+PASS quality 'Sharp': the 640 plate finder is fetched and used {"tier": "sharp", "det": "det640", "ocr": "ocrAcc", "loaded": ["ocrFast", "det384", "ocrAcc", "det640"]}
+PASS deleting a plate from history also removes it from the scan tray {"board": false, "chip": false, "hist": ["AB12CDE"]}
+PASS keep photos off: existing photos removed, new plates saved without one 0 {'imgs': 0, 'keys': ['241D12345', 'AB12CDE']}
+PASS what's new appears once after an update 
+PASS history: plates past the retention period are deleted automatically 30 days: ['241D12345', 'AB12CDE', 'OLD10'] · 7 days: ['241D12345', 'AB12CDE']
+=== debug: 36 s
+
+=== slow
+PASS slow first launch: no false 'hang', no safe mode {"ready": true, "err": null, "threads": 4, "safe": null, "errors": [], "same": true} took 19.9s
+PASS an update during the first download doesn't interrupt it 
+PASS ...and the update is offered once the AI is ready PlateSight was updated
+Reload
+=== slow: 22 s
+
+=== upgrade
+FAIL upgrading from 1.0: downloaded models carry over, no re-download copied=2 downloads=['http://127.0.0.1:8765/models/plate-detector-384.onnx?v=888397b96d76', 'http://127.0.0.1:8765/models/plate-ocr-fast.onnx?v=18054a6ca401'] caches=['ps-shell-dev', 'ps-ort-1.20.1', 'ps-models']
+PASS upgrading from 1.0: what's new is shown 
+=== upgrade: 3 s
+
+=== datasaver
+PASS Data Saver: Auto doesn't download the sharper models {"tier": "fast", "det": "det384", "loaded": ["ocrFast", "det384"]} downloads=['plate-detector-384.onnx?v=888397b96d76', 'plate-ocr-fast.onnx?v=18054a6ca401']
+PASS Data Saver: Auto steps up to models already on the phone, without downloading {"tier": "sharp", "det": "det640", "loaded": ["ocrFast", "det384", "ocrAcc", "det640"]} downloads=[]
+=== datasaver: 26 s
+
+=== counter
+PASS TrafficSight starts on a phone without PlateSight, multi-core {"threads": 4, "fps": 3}
+PASS TrafficSight opens from its own address on a phone with PlateSight, multi-core, with its own service worker {"title": "TrafficSight", "model": "nano", "bench": 178.8, "threads": 4, "coi": true, "sw": "http://127.0.0.1:8765/count/sw.js"}
+PASS counting: the screen dims to save battery and wakes on a tap 
+PASS counter: each car counted once, in its direction, as a vehicle [1, 1] [{"t": 1790810965814, "kind": "truck", "dir": 2, "speed": 56.8, "length": 15.5, "conf": 0.37, "frames": 33}, {"t": 1790810971361, "kind": "car", "dir": 1, "speed": 38.7, "length": 20.3, "conf": 0.65, "frames": 74}]
+PASS counter: speeds between the lines (40 and 60 km/h, within 15%) east=38.7 west=56.8 fps=13.8
+PASS results: figures, hourly chart and speed chart {"tiles": "Motor vehicles\n6\nin 1 min\nBusiest hour\n6\n23:00 to 00:00\n85% at or under\n61 km/h\n5 speeds\nOver 50 km/h\n60%\n3 vehicles", "hours": 50740, "speeds": 74198, "rows": 8}
+PASS results: CSV export and the council report (PDF) 'time,type,direction,speed_kmh,length_m,site\n2026-09-30 23:29:12,car,Eastbound,,,Test Road\n2026-09-30 23:29:14,van or truck,Westbound,62,15.6,Test Road\n2026-09-3' pdf=9296 bytes
+PASS TrafficSight works offline after the first start 
+PASS PlateSight is unaffected 
+=== counter: 44 s
+
+=== fallback
+PASS damaged engine file on the site: a good copy is swapped in, every core kept {"ready": true, "err": null, "info": {"threads": 4, "eps": ["wasm"], "source": "site", "tried": [], "runtimeMs": 713, "coi": true, "version": "1.20.1", "safe": false, "requestedThreads": 4, "ep": "wasm"}, "errors": [], "safe": null} cdn: ['ort-wasm-simd-threaded.wasm']
+PASS ...and the good copy is kept for next time (no download) {"ready": true, "err": null, "info": {"threads": 4, "eps": ["wasm"], "source": "site", "tried": [], "runtimeMs": 101, "coi": true, "version": "1.20.1", "safe": false, "requestedThreads": 4, "ep": "wasm"}, "errors": [], "safe": null} cdn: []
+=== fallback: 4 s
+
+=== gpu
+gpu boot {"info": {"threads": 4, "eps": ["webgpu", "wasm"], "source": "site", "tried": [], "runtimeMs": 209, "coi": true, "version": "1.20.1", "safe": false, "requestedThreads": 4, "ep": "webgpu"}, "err": null, "gpu": true}
+PASS GPU mode: runs on WebGPU and reads plates live and in photos ep=webgpu gpuError=None live=['241-D-12345'] photo=['AB12 CDE']
+=== gpu: 164 s
+
+console errors: 0
+
+SUMMARY 50 / 51 passed
+FAILED: upgrading from 1.0: downloaded models carry over, no re-download
