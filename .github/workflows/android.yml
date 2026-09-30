@@ -19,8 +19,9 @@ on:
 permissions:
   contents: write
 
+# A newer push to the same branch replaces a run in progress; main and next don't cancel each other.
 concurrency:
-  group: android-app
+  group: android-app-${{ github.ref }}
   cancel-in-progress: true
 
 defaults:
