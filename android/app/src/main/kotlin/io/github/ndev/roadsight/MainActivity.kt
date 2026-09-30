@@ -31,6 +31,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -65,6 +67,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.ndev.roadsight.history.HistoryScreen
 import io.github.ndev.roadsight.plates.PlatesScreen
 import io.github.ndev.roadsight.settings.SettingsScreen
+import io.github.ndev.roadsight.settings.SpeedTestOffer
 import io.github.ndev.roadsight.traffic.TrafficScreen
 import io.github.ndev.roadsight.ui.C
 import io.github.ndev.roadsight.ui.Ic
@@ -105,6 +108,7 @@ fun RoadSightApp() {
     val counting by app.traffic.ui.collectAsState()
     val shared by app.sharedPhoto.collectAsState()
     val openSession by app.openSession.collectAsState()
+    val update by app.updates.available.collectAsState()
     LaunchedEffect(shared) { if (shared != null) tab = Tab.PLATES }
     LaunchedEffect(openSession) { if (openSession != null) tab = Tab.HISTORY }
     // While counting, the traffic screen has the whole screen (and the tabs can't stop it by accident).
@@ -135,7 +139,14 @@ fun RoadSightApp() {
                             modifier = Modifier.testTag("tab-${t.name.lowercase()}"),
                             selected = tab == t,
                             onClick = { tab = t },
-                            icon = { Icon(iconFor(t), contentDescription = null) },
+                            icon = {
+                                // A dot on Settings when a newer RoadSight is out.
+                                if (t == Tab.SETTINGS && update != null) {
+                                    BadgedBox(badge = { Badge(containerColor = C.sky) }) { Icon(iconFor(t), contentDescription = null) }
+                                } else {
+                                    Icon(iconFor(t), contentDescription = null)
+                                }
+                            },
                             label = { Text(t.label) },
                             colors = NavigationBarItemDefaults.colors(
                                 selectedIconColor = C.bg,
@@ -164,6 +175,8 @@ fun RoadSightApp() {
             }
         }
     }
+    // First launch: offer the speed test.
+    SpeedTestOffer()
 }
 
 private fun iconFor(t: Tab): ImageVector = when (t) {

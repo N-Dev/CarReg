@@ -15,8 +15,11 @@ import io.github.ndev.roadsight.camera.CameraHost
 import io.github.ndev.roadsight.core.Json
 import io.github.ndev.roadsight.core.traffic.Lines
 import io.github.ndev.roadsight.data.Db
+import io.github.ndev.roadsight.data.Updates
 import io.github.ndev.roadsight.plates.PlateScanner
+import io.github.ndev.roadsight.plates.Watchlist
 import io.github.ndev.roadsight.traffic.TrafficCounter
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -37,6 +40,9 @@ class App : Application() {
     lateinit var camera: CameraHost
         private set
     val plates: PlateScanner by lazy { PlateScanner(this) }
+
+    /** Plates to look out for, and plates to ignore (my cars). */
+    val watch: Watchlist by lazy { Watchlist(this) }
     val traffic: TrafficCounter by lazy { TrafficCounter(this) }
 
     /** A photo shared to the app ("Share → RoadSight"), waiting to be read. */
@@ -44,6 +50,9 @@ class App : Application() {
 
     /** A counting session to show in History (after "See results"). */
     val openSession = MutableStateFlow<Long?>(null)
+
+    /** Checks GitHub for a newer release. */
+    val updates: Updates by lazy { Updates(this) }
 
     /** Bumped when plates or counts are saved or deleted, so lists reload. */
     val dataVersion = MutableStateFlow(0)
@@ -55,6 +64,9 @@ class App : Application() {
     /** Background work that mustn't hold up the camera: saving to the database, tidying history. */
     val io = Executors.newSingleThreadExecutor()
 
+    /** The same thread, for coroutines. */
+    val ioDispatcher by lazy { io.asCoroutineDispatcher() }
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -63,6 +75,8 @@ class App : Application() {
         engine = Engine(this)
         camera = CameraHost(this)
         channels()
+        watch.load()
+        updates.checkIfDue()
         io.execute {
             // History deletes itself after the chosen period.
             runCatching { db.prunePlates(prefs.retentionDays()) }
@@ -162,6 +176,17 @@ class Prefs(context: Context) {
         }
     }
 
+    private fun long(key: String, def: Long) = object : ReadWriteProperty<Any?, Long> {
+        override fun getValue(thisRef: Any?, property: KProperty<*>): Long {
+            track()
+            return sp.getLong(key, def)
+        }
+        override fun setValue(thisRef: Any?, property: KProperty<*>, value: Long) {
+            sp.edit().putLong(key, value).apply()
+            bump()
+        }
+    }
+
     private fun dbl(key: String, def: Double) = object : ReadWriteProperty<Any?, Double> {
         override fun getValue(thisRef: Any?, property: KProperty<*>): Double {
             track()
@@ -200,6 +225,17 @@ class Prefs(context: Context) {
 
     /** Debug mode: overlays, timings and the log. */
     var debug by bool("debug", false)
+
+    // ---------------------------------------------------------------- app
+    /** The speed test was offered (once, at first launch). */
+    var speedTestOffered by bool("speed_offered", false)
+
+    /** Look for a newer release on GitHub once a day. */
+    var updateCheck by bool("update_check", true)
+    var lastUpdateCheck by long("update_last", 0L)
+
+    /** The latest release the last check found (JSON), so the update banner shows between checks. */
+    var latestRelease by str("update_latest", "")
 
     // ---------------------------------------------------------------- traffic
     /** auto | tiny | nano */
@@ -251,6 +287,42 @@ class Prefs(context: Context) {
 
     /** Per-model settings found fastest by the speed test, e.g. {"det384": "XNNPACK:4"}. */
     var tuned by str("tuned", "")
+
+    // ---------------------------------------------------------------- backup
+    /** Settings that belong to this phone rather than to the user (not copied by a backup). */
+    private val phoneOnly = setOf("tuned", "update_last", "update_latest", "speed_offered")
+
+    /** Every setting, with its type, for a backup: {"format": {"t": "s", "v": "auto"}, ...}. */
+    fun export(): Map<String, Any?> = sp.all.filterKeys { it !in phoneOnly }.mapNotNull { (k, v) ->
+        val t = when (v) {
+            is String -> "s"
+            is Boolean -> "b"
+            is Int -> "i"
+            is Long -> "l"
+            is Float -> "f"
+            else -> return@mapNotNull null
+        }
+        k to mapOf("t" to t, "v" to v)
+    }.toMap()
+
+    /** Puts back settings from a backup (settings it doesn't mention keep their values). */
+    fun import(m: Map<String, Any?>) {
+        val e = sp.edit()
+        for ((k, raw) in m) {
+            if (k in phoneOnly) continue
+            val o = raw as? Map<*, *> ?: continue
+            val v = o["v"]
+            when (o["t"]) {
+                "s" -> (v as? String)?.let { e.putString(k, it) }
+                "b" -> (v as? Boolean)?.let { e.putBoolean(k, it) }
+                "i" -> (v as? Number)?.let { e.putInt(k, it.toInt()) }
+                "l" -> (v as? Number)?.let { e.putLong(k, it.toLong()) }
+                "f" -> (v as? Number)?.let { e.putFloat(k, it.toFloat()) }
+            }
+        }
+        e.commit()
+        bump()
+    }
 }
 
 val SENS = mapOf("low" to 0.5, "medium" to 0.35, "high" to 0.25)

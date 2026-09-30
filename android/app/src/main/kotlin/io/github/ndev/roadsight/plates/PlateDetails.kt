@@ -125,6 +125,8 @@ fun PlateSheet(v: PlateView, onDismiss: () -> Unit, onDelete: (() -> Unit)? = nu
                     OutlinedButton(onClick = onDelete, colors = ButtonDefaults.outlinedButtonColors(contentColor = C.red)) { Text("Delete") }
                 }
             }
+            Spacer(Modifier.height(6.dp))
+            WatchButtons(v.key, v.text)
         }
     }
 }

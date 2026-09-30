@@ -27,6 +27,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -54,6 +55,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size as GSize
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -68,6 +70,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.ndev.roadsight.App
 import io.github.ndev.roadsight.CameraGate
+import io.github.ndev.roadsight.ai.Model
+import io.github.ndev.roadsight.debug.DebugStrip
+import io.github.ndev.roadsight.debug.enginesText
+import io.github.ndev.roadsight.debug.rememberHealth
+import kotlinx.coroutines.delay
 import io.github.ndev.roadsight.camera.CameraHost
 import io.github.ndev.roadsight.camera.CameraPreview
 import io.github.ndev.roadsight.camera.CameraUse
@@ -95,10 +102,15 @@ fun PlatesScreen() {
         }
     }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> if (uri != null) photo = uri }
+    var lists by rememberSaveable { mutableStateOf(false) }
 
     val current = photo
     if (current != null) {
         PhotoScreen(current, onClose = { photo = null })
+        return
+    }
+    if (lists) {
+        WatchlistScreen(onClose = { lists = false })
         return
     }
     // Photos can be read without the camera.
@@ -106,11 +118,17 @@ fun PlatesScreen() {
         OutlinedButton(onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
             Text("Read a photo instead")
         }
-    }) { LiveScreen(app, ui, notice, onPick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }) }
+    }) {
+        LiveScreen(
+            app, ui, notice,
+            onPick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+            onLists = { lists = true },
+        )
+    }
 }
 
 @Composable
-private fun LiveScreen(app: App, ui: PlateUi, notice: String?, onPick: () -> Unit) {
+private fun LiveScreen(app: App, ui: PlateUi, notice: String?, onPick: () -> Unit, onLists: () -> Unit) {
     val host = app.camera
     val camera by host.camera.collectAsState()
     val zoomInfo by host.zoom.collectAsState()
@@ -126,6 +144,17 @@ private fun LiveScreen(app: App, ui: PlateUi, notice: String?, onPick: () -> Uni
     var menu by remember { mutableStateOf(false) }
     val askNotifications = rememberNotificationRequest()
     val use = remember { CameraUse(app.plates, CameraHost.PLATES_RES, "plates") }
+    val debug = app.prefs.debug
+    val hit by app.watch.lastHit.collectAsState()
+    var showHit by remember { mutableStateOf<Watchlist.Hit?>(null) }
+    LaunchedEffect(hit) {
+        val h = hit ?: return@LaunchedEffect
+        val left = 8000 - (System.currentTimeMillis() - h.at)
+        if (left <= 0) return@LaunchedEffect
+        showHit = h
+        delay(left)
+        showHit = null
+    }
 
     DisposableEffect(paused, busy) {
         if (!paused && !busy) app.plates.start()
@@ -161,7 +190,7 @@ private fun LiveScreen(app: App, ui: PlateUi, notice: String?, onPick: () -> Uni
                 },
             ) {
                 CameraPreview(Modifier.fillMaxSize(), use, zoom)
-                LiveOverlay(ui, Modifier.fillMaxSize())
+                LiveOverlay(ui, debug, Modifier.fillMaxSize())
             }
         } else {
             Column(Modifier.align(Alignment.Center).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -171,55 +200,67 @@ private fun LiveScreen(app: App, ui: PlateUi, notice: String?, onPick: () -> Uni
             }
         }
 
-        // Top: status and controls
-        Row(
-            Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            val status = when {
-                busy -> "Counting traffic"
-                paused -> "Paused"
-                !ui.ready -> ui.status
-                else -> (if (watching) "Watching · " else "") + "%.0f fps · %.0f ms · %s%s".format(ui.fps, ui.msTotal, ui.tier, if (ui.idle) " · idle" else "")
-            }
-            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                Pill(status, dot = if (busy || !ui.ready || paused) C.amber else if (watching) C.sky else C.mint)
-            }
-            val cam = camera
-            if (!busy && !paused && cam != null && cam.cameraInfo.hasFlashUnit()) {
-                RoundButton(Ic.torch, on = torch) {
-                    torch = !torch
-                    cam.cameraControl.enableTorch(torch)
+        // Top: status and controls, then a watched plate just seen, then debug mode's numbers
+        Column(Modifier.fillMaxWidth().statusBarsPadding()) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val status = when {
+                    busy -> "Counting traffic"
+                    paused -> "Paused"
+                    !ui.ready -> ui.status
+                    else -> (if (watching) "Watching · " else "") + "%.0f fps · %.0f ms · %s%s".format(ui.fps, ui.msTotal, ui.tier, if (ui.idle) " · idle" else "")
+                }
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                    Pill(status, dot = if (busy || !ui.ready || paused) C.amber else if (watching) C.sky else C.mint)
+                }
+                val cam = camera
+                if (!busy && !paused && cam != null && cam.cameraInfo.hasFlashUnit()) {
+                    RoundButton(Ic.torch, "Torch", on = torch) {
+                        torch = !torch
+                        cam.cameraControl.enableTorch(torch)
+                    }
+                }
+                RoundButton(Ic.photo, "Read a photo", onClick = onPick)
+                if (!busy) {
+                    RoundButton(if (paused) Ic.play else Ic.pause, if (paused) "Scan again" else "Pause") {
+                        if (!paused && watching) app.plates.stopWatching()
+                        paused = !paused
+                    }
+                }
+                Box {
+                    RoundButton(Icons.Filled.MoreVert, "More") { menu = true }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Keep watching with the screen off") },
+                            enabled = !busy && !paused,
+                            leadingIcon = { Checkbox(checked = watching, onCheckedChange = null) },
+                            onClick = {
+                                menu = false
+                                if (watching) {
+                                    app.plates.stopWatching()
+                                } else {
+                                    askNotifications()
+                                    app.plates.startWatching()
+                                }
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Watchlist and my cars") },
+                            leadingIcon = { Icon(Icons.Filled.Notifications, contentDescription = null) },
+                            onClick = {
+                                menu = false
+                                onLists()
+                            },
+                        )
+                        HorizontalDivider(color = C.line2)
+                        OrientationItems(app) { menu = false }
+                    }
                 }
             }
-            RoundButton(Ic.photo, onClick = onPick)
-            if (!busy) {
-                RoundButton(if (paused) Ic.play else Ic.pause) {
-                    if (!paused && watching) app.plates.stopWatching()
-                    paused = !paused
-                }
-            }
-            Box {
-                RoundButton(Icons.Filled.MoreVert) { menu = true }
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(
-                        text = { Text("Keep watching with the screen off") },
-                        enabled = !busy && !paused,
-                        leadingIcon = { Checkbox(checked = watching, onCheckedChange = null) },
-                        onClick = {
-                            menu = false
-                            if (watching) {
-                                app.plates.stopWatching()
-                            } else {
-                                askNotifications()
-                                app.plates.startWatching()
-                            }
-                        },
-                    )
-                    HorizontalDivider(color = C.line2)
-                    OrientationItems(app) { menu = false }
-                }
-            }
+            showHit?.let { h -> HitBanner(h, Modifier.padding(horizontal = 12.dp)) { showHit = null } }
+            if (debug && !busy && !paused) PlatesDebug(ui, Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
         }
 
         // Bottom: zoom and the plates found
@@ -286,12 +327,12 @@ fun OrientationItems(app: App, onDone: () -> Unit) {
 }
 
 @Composable
-fun RoundButton(icon: androidx.compose.ui.graphics.vector.ImageVector, on: Boolean = false, onClick: () -> Unit) {
+fun RoundButton(icon: androidx.compose.ui.graphics.vector.ImageVector, description: String, on: Boolean = false, onClick: () -> Unit) {
     IconButton(
         onClick = onClick,
         modifier = Modifier.padding(start = 6.dp).size(42.dp),
         colors = IconButtonDefaults.iconButtonColors(containerColor = if (on) C.amber else Color(0x99141821), contentColor = if (on) C.bg else C.text),
-    ) { Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp)) }
+    ) { Icon(icon, contentDescription = description, modifier = Modifier.size(22.dp)) }
 }
 
 @Composable
@@ -311,7 +352,8 @@ private fun Tray(items: List<TrayItem>, onClick: (TrayItem) -> Unit) {
     ) {
         items(items, key = { it.key }) { e ->
             Row(
-                Modifier.clip(RoundedCornerShape(14.dp)).background(C.surface).border(1.dp, C.line2, RoundedCornerShape(14.dp))
+                Modifier.clip(RoundedCornerShape(14.dp)).background(C.surface)
+                    .border(if (e.watched) 2.dp else 1.dp, if (e.watched) C.sky else C.line2, RoundedCornerShape(14.dp))
                     .clickable { onClick(e) }.padding(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -328,9 +370,13 @@ private fun Tray(items: List<TrayItem>, onClick: (TrayItem) -> Unit) {
     }
 }
 
-/** Plate boxes over the picture, which is letterboxed exactly like the frames the AI sees. */
+/**
+ * Plate boxes over the picture, which is letterboxed exactly like the frames the AI sees. Watched plates
+ * are blue. Debug mode adds everything the plate finder found this frame (dashed, with its score and
+ * reading) and each tracked plate's number and how many readings it has.
+ */
 @Composable
-private fun LiveOverlay(ui: PlateUi, modifier: Modifier) {
+private fun LiveOverlay(ui: PlateUi, debug: Boolean, modifier: Modifier) {
     Canvas(modifier) {
         if (ui.frameW == 0) return@Canvas
         val s = minOf(size.width / ui.frameW, size.height / ui.frameH)
@@ -344,8 +390,26 @@ private fun LiveOverlay(ui: PlateUi, modifier: Modifier) {
             textSize = 13.sp.toPx()
             typeface = android.graphics.Typeface.DEFAULT_BOLD
         }
+        if (debug) {
+            val dash = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx()))
+            val small = android.graphics.Paint().apply {
+                isAntiAlias = true
+                textSize = 10.5.sp.toPx()
+                typeface = android.graphics.Typeface.MONOSPACE
+            }
+            for (r in ui.raw) {
+                val l = x(r.box[0])
+                val t = y(r.box[1])
+                val c = if (r.edge) C.amber else C.sky
+                drawRect(c, Offset(l, t), GSize(x(r.box[2]) - l, y(r.box[3]) - t), style = Stroke(width = 1.dp.toPx(), pathEffect = dash))
+                val label = "%.2f".format(r.score) + (r.text?.let { " $it %.2f".format(r.conf) } ?: "") + (if (r.edge) " edge" else "")
+                small.color = c.toArgb()
+                drawContext.canvas.nativeCanvas.drawText(label, l, y(r.box[3]) + 12.sp.toPx(), small)
+            }
+        }
         for (b in ui.boxes) {
             val color = when {
+                b.watched -> C.sky
                 b.confirmed && b.valid -> C.mint
                 b.confirmed -> C.amber
                 else -> Color.White.copy(alpha = 0.7f)
@@ -353,7 +417,8 @@ private fun LiveOverlay(ui: PlateUi, modifier: Modifier) {
             val l = x(b.box[0])
             val t = y(b.box[1])
             drawRoundRect(color, Offset(l, t), GSize(x(b.box[2]) - l, y(b.box[3]) - t), CornerRadius(6f, 6f), style = Stroke(width = if (b.confirmed) 3.dp.toPx() else 1.5.dp.toPx()))
-            b.text?.let { text ->
+            val shown = if (debug) "#${b.id} · ${b.reads}× " + (b.text ?: "") else b.text
+            shown?.let { text ->
                 val w = paint.measureText(text) + 12.dp.toPx()
                 val h = 20.dp.toPx()
                 drawRoundRect(Color(0xCC000000), Offset(l, t - h - 4), GSize(w, h), CornerRadius(8f, 8f))
@@ -373,4 +438,43 @@ fun DrawScope.corners(l: Float, t: Float, r: Float, b: Float) {
         drawLine(c, Offset(x, y), Offset(x + dx * k, y), w)
         drawLine(c, Offset(x, y), Offset(x, y + dy * k), w)
     }
+}
+
+/** A plate on the watchlist was just seen. Tap to dismiss. */
+@Composable
+private fun HitBanner(h: Watchlist.Hit, modifier: Modifier = Modifier, onDismiss: () -> Unit) {
+    Row(
+        modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(C.sky).clickable(onClick = onDismiss)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Filled.Notifications, contentDescription = null, tint = C.bg, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            val name = h.row.label.ifEmpty { h.text }
+            Text("$name is here", color = C.bg, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text(
+                (if (h.row.label.isNotEmpty()) "${h.text} · " else "") + "on your watchlist · " + HIT_TIME.format(java.time.Instant.ofEpochMilli(h.at)),
+                color = C.bg, fontSize = 12.5.sp,
+            )
+        }
+    }
+}
+
+private val HIT_TIME = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss").withZone(java.time.ZoneId.systemDefault())
+
+/** Debug mode's numbers for live plate reading. */
+@Composable
+private fun PlatesDebug(ui: PlateUi, modifier: Modifier = Modifier) {
+    val camFps by App.instance.camera.cameraFps.collectAsState()
+    val health = rememberHealth(true)
+    val lines = buildList {
+        add("camera %.1f fps · analysed %.1f fps · %d frames".format(camFps, ui.fps, ui.frames))
+        add("find %.0f ms · read %.0f ms · total %.0f ms".format(ui.msFind, ui.msRead, ui.msTotal))
+        add("${ui.tier}${if (ui.reason.isNotEmpty()) " (${ui.reason})" else ""} · reader ${ui.reader}${if (ui.idle) " · idle" else ""}")
+        add("frame ${ui.frameW}×${ui.frameH}" + (ui.region?.let { " · area ${it[2]}×${it[3]}" } ?: "") + " · ${ui.raw.size} found · ${ui.boxes.size} tracked")
+        add(enginesText(listOf(Model.DET384, Model.DET640, Model.OCR_FAST, Model.OCR_ACC).filter { App.instance.engine.isLoaded(it) }))
+        health?.let { add(it.text()) }
+    }
+    DebugStrip(lines, ui.times, modifier)
 }

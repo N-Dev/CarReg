@@ -42,8 +42,23 @@ class SessionRow(
     val vehicles: Int,
 )
 
-/** Everything the app keeps, on the phone only: plate history and traffic counts. No images of traffic. */
-class Db(context: Context) : SQLiteOpenHelper(context, "roadsight.db", null, 1) {
+/** A plate on the watchlist (mode "watch": tell me when it's seen) or ignored ("ignore": one of my cars). */
+class WatchRow(
+    val key: String,
+    val text: String,
+    val label: String,
+    val mode: String,
+    val added: Long,
+    val lastSeen: Long,
+    val seen: Int,
+)
+
+/** Everything the app keeps, on the phone only: plate history, traffic counts and the watchlist. No images of traffic. */
+class Db(context: Context) : SQLiteOpenHelper(context, NAME, null, 2) {
+    companion object {
+        const val NAME = "roadsight.db"
+    }
+
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             "CREATE TABLE plates (key TEXT PRIMARY KEY, text TEXT, region TEXT, profile TEXT, valid INTEGER, conf REAL, " +
@@ -55,9 +70,52 @@ class Db(context: Context) : SQLiteOpenHelper(context, "roadsight.db", null, 1) 
         )
         db.execSQL("CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, session INTEGER, t INTEGER, kind TEXT, dir INTEGER, speed REAL, length REAL)")
         db.execSQL("CREATE INDEX events_session ON events(session)")
+        createWatch(db)
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {}
+    private fun createWatch(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS watch (key TEXT PRIMARY KEY, text TEXT, label TEXT, mode TEXT, added INTEGER, last_seen INTEGER, seen INTEGER)")
+    }
+
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) createWatch(db)
+    }
+
+    // ---------------------------------------------------------------- watchlist
+    fun watchList(): List<WatchRow> =
+        readableDatabase.rawQuery("SELECT key, text, label, mode, added, last_seen, seen FROM watch ORDER BY mode DESC, text", null).use { c ->
+            val out = ArrayList<WatchRow>()
+            while (c.moveToNext()) {
+                out.add(WatchRow(c.getString(0), c.getString(1) ?: c.getString(0), c.getString(2) ?: "", c.getString(3) ?: "watch", c.getLong(4), c.getLong(5), c.getInt(6)))
+            }
+            out
+        }
+
+    /** Adds a plate to the watchlist or the ignore list, or changes its label or list. */
+    @Synchronized
+    fun setWatch(key: String, text: String, label: String, mode: String) {
+        val v = ContentValues()
+        v.put("text", text)
+        v.put("label", label)
+        v.put("mode", mode)
+        val db = writableDatabase
+        if (db.update("watch", v, "key = ?", arrayOf(key)) == 0) {
+            v.put("key", key)
+            v.put("added", System.currentTimeMillis())
+            v.put("last_seen", 0L)
+            v.put("seen", 0)
+            db.insert("watch", null, v)
+        }
+    }
+
+    fun removeWatch(key: String) {
+        writableDatabase.delete("watch", "key = ?", arrayOf(key))
+    }
+
+    @Synchronized
+    fun watchSeen(key: String, time: Long) {
+        writableDatabase.execSQL("UPDATE watch SET last_seen = ?, seen = seen + 1 WHERE key = ?", arrayOf<Any>(time, key))
+    }
 
     // ---------------------------------------------------------------- plates
     private fun infoJson(i: PlateInfo?): String? = i?.let {
@@ -236,6 +294,12 @@ class Db(context: Context) : SQLiteOpenHelper(context, "roadsight.db", null, 1) 
         val db = writableDatabase
         db.delete("events", "session = ?", arrayOf(id.toString()))
         db.delete("sessions", "id = ?", arrayOf(id.toString()))
+    }
+
+    /** Makes sure everything written is in the main database file (for a backup). */
+    @Synchronized
+    fun checkpoint() {
+        runCatching { writableDatabase.rawQuery("PRAGMA wal_checkpoint(FULL)", null).use { it.moveToFirst() } }
     }
 
     fun clearSessions() {

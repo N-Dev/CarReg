@@ -66,6 +66,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
@@ -85,6 +86,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.ndev.roadsight.App
+import io.github.ndev.roadsight.ai.Model
+import io.github.ndev.roadsight.debug.DebugStrip
+import io.github.ndev.roadsight.debug.enginesText
+import io.github.ndev.roadsight.debug.rememberHealth
 import io.github.ndev.roadsight.camera.CameraHost
 import io.github.ndev.roadsight.camera.CameraPreview
 import io.github.ndev.roadsight.camera.CameraUse
@@ -325,7 +330,7 @@ fun TrafficScreen() {
                 }
                 if (!busy) TrafficOverlay(
                     ui = ui, lines = lines, distanceM = if (editing) distanceText.replace(',', '.').toDoubleOrNull() ?: prefs.distanceM else prefs.distanceM,
-                    editing = editing, aspect = aspect, roi = roi,
+                    editing = editing, aspect = aspect, roi = roi, debug = prefs.debug,
                     modifier = Modifier.fillMaxSize().pointerInput(editing, aspect) {
                         if (!editing) return@pointerInput
                         awaitEachGesture {
@@ -341,49 +346,52 @@ fun TrafficScreen() {
                         }
                     },
                 )
-                Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    val status = when {
-                        busy -> "Watching for plates"
-                        !ui.ready -> ui.status
-                        else -> "${if (ui.running) "Counting" else "Watching"} · ${fps(ui.fps)} fps${if (ui.idle) " · idle" else ""}"
-                    }
-                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                        Pill(
-                            status, dot = if (busy || !ui.ready) C.amber else if (ui.running) C.red else C.mint,
-                            modifier = Modifier.clickable {
-                                scope.launch {
-                                    snack.showSnackbar(
-                                        if (ui.ready) "${ui.model} model · AI ${ui.msAi.toInt()} ms a frame · picture ${ui.msPrep.toInt()} ms" else ui.status,
-                                    )
-                                }
-                            },
-                        )
-                    }
-                    Box {
-                        RoundButton(Icons.Filled.MoreVert) { menu = true }
-                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                            val other = if (landscape) "portrait" else "landscape"
-                            DropdownMenuItem(
-                                text = { Text("Set up for $other") },
-                                enabled = !ui.running && !busy,
-                                onClick = {
-                                    menu = false
-                                    // The lines only fit the picture one way round: turn it and set them again.
-                                    prefs.trafficOrientation = other
-                                    openEditor(fresh = true)
-                                },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Keep counting with the screen off") },
-                                leadingIcon = { Checkbox(checked = prefs.backgroundCounting, onCheckedChange = null) },
-                                enabled = !ui.running,
-                                onClick = {
-                                    menu = false
-                                    prefs.backgroundCounting = !prefs.backgroundCounting
+                Column(Modifier.fillMaxWidth().statusBarsPadding()) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        val status = when {
+                            busy -> "Watching for plates"
+                            !ui.ready -> ui.status
+                            else -> "${if (ui.running) "Counting" else "Watching"} · ${fps(ui.fps)} fps${if (ui.idle) " · idle" else ""}"
+                        }
+                        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                            Pill(
+                                status, dot = if (busy || !ui.ready) C.amber else if (ui.running) C.red else C.mint,
+                                modifier = Modifier.clickable {
+                                    scope.launch {
+                                        snack.showSnackbar(
+                                            if (ui.ready) "${ui.model} model · AI ${ui.msAi.toInt()} ms a frame · picture ${ui.msPrep.toInt()} ms" else ui.status,
+                                        )
+                                    }
                                 },
                             )
                         }
+                        Box {
+                            RoundButton(Icons.Filled.MoreVert, "More") { menu = true }
+                            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                val other = if (landscape) "portrait" else "landscape"
+                                DropdownMenuItem(
+                                    text = { Text("Set up for $other") },
+                                    enabled = !ui.running && !busy,
+                                    onClick = {
+                                        menu = false
+                                        // The lines only fit the picture one way round: turn it and set them again.
+                                        prefs.trafficOrientation = other
+                                        openEditor(fresh = true)
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Keep counting with the screen off") },
+                                    leadingIcon = { Checkbox(checked = prefs.backgroundCounting, onCheckedChange = null) },
+                                    enabled = !ui.running,
+                                    onClick = {
+                                        menu = false
+                                        prefs.backgroundCounting = !prefs.backgroundCounting
+                                    },
+                                )
+                            }
+                        }
                     }
+                    if (prefs.debug && !busy && !editing && ui.ready) TrafficDebug(ui, Modifier.padding(horizontal = 12.dp))
                 }
                 if (editing) {
                     Text(
@@ -705,7 +713,7 @@ private fun moved(start: Lines, g: Grab, p: Offset, r: VideoRect): Lines {
 
 /** The picture's overlay: the analysed area, road users (counted ones in green), the two lines and their distance. */
 @Composable
-private fun TrafficOverlay(ui: TrafficUi, lines: Lines, distanceM: Double, editing: Boolean, aspect: Double, roi: DoubleArray, modifier: Modifier) {
+private fun TrafficOverlay(ui: TrafficUi, lines: Lines, distanceM: Double, editing: Boolean, aspect: Double, roi: DoubleArray, debug: Boolean, modifier: Modifier) {
     Canvas(modifier) {
         val r = videoRect(size.width, size.height, aspect)
         fun x(v: Double) = r.x + (v * r.w).toFloat()
@@ -717,18 +725,46 @@ private fun TrafficOverlay(ui: TrafficUi, lines: Lines, distanceM: Double, editi
             textSize = 12.sp.toPx()
             typeface = android.graphics.Typeface.DEFAULT_BOLD
         }
+        if (!editing && ui.ready && debug) {
+            // Debug mode: what the finder saw this frame (dashed), and where each tracked road user is heading.
+            val dash = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 4.dp.toPx()))
+            val small = android.graphics.Paint().apply {
+                isAntiAlias = true
+                textSize = 10.sp.toPx()
+                typeface = android.graphics.Typeface.MONOSPACE
+                color = C.sky.toArgb()
+            }
+            for (d in ui.raw) {
+                val l = x(d.box[0])
+                val t = y(d.box[1])
+                drawRect(C.sky, Offset(l, t), androidx.compose.ui.geometry.Size(x(d.box[2]) - l, y(d.box[3]) - t), style = Stroke(1.dp.toPx(), pathEffect = dash))
+                canvas.drawText("${d.cls} %.2f".format(d.score), l, y(d.box[3]) + 11.sp.toPx(), small)
+            }
+            for (b in ui.boxes) {
+                // Half a second of travel at its current speed, from where it touches the road.
+                val fx = (b.box[0] + b.box[2]) / 2
+                val fy = b.box[3]
+                val from = Offset(x(fx), y(fy))
+                val to = Offset(x(fx + b.vx * 500), y(fy + b.vy * 500))
+                if ((to - from).getDistance() > 4.dp.toPx()) {
+                    drawLine(C.amber, from, to, 2.dp.toPx(), StrokeCap.Round)
+                    drawCircle(C.amber, 3.dp.toPx(), to)
+                }
+            }
+        }
         if (!editing && ui.ready) {
             for (b in ui.boxes) {
                 val l = x(b.box[0])
                 val t = y(b.box[1])
                 val color = if (b.counted) C.mint else Color.White.copy(alpha = 0.55f)
                 drawRect(color, Offset(l, t), androidx.compose.ui.geometry.Size(x(b.box[2]) - l, y(b.box[3]) - t), style = Stroke(if (b.flash) 3.dp.toPx() else 1.5.dp.toPx()))
-                val tw = paint.measureText(b.label) + 10.dp.toPx()
+                val text = if (debug) "#${b.id} ${b.label} ·${b.hits}" else b.label
+                val tw = paint.measureText(text) + 10.dp.toPx()
                 val th = 17.dp.toPx()
                 drawRect(if (b.counted) Color(0xD906281E) else Color(0x8C000000), Offset(l, t - th - 1), androidx.compose.ui.geometry.Size(tw, th))
                 paint.color = if (b.counted) C.mint.toArgb() else android.graphics.Color.WHITE
                 paint.textAlign = android.graphics.Paint.Align.LEFT
-                canvas.drawText(b.label, l + 5.dp.toPx(), t - 5.dp.toPx(), paint)
+                canvas.drawText(text, l + 5.dp.toPx(), t - 5.dp.toPx(), paint)
             }
         }
         for ((name, l) in listOf("A" to lines.a, "B" to lines.b)) {
@@ -768,4 +804,23 @@ private fun TrafficOverlay(ui: TrafficUi, lines: Lines, distanceM: Double, editi
         paint.color = android.graphics.Color.WHITE
         canvas.drawText(label, midX - lw / 2 + 6.dp.toPx(), ly + 13.dp.toPx(), paint)
     }
+}
+
+/** Debug mode's numbers for counting. */
+@Composable
+private fun TrafficDebug(ui: TrafficUi, modifier: Modifier = Modifier) {
+    val camFps by App.instance.camera.cameraFps.collectAsState()
+    val health = rememberHealth(true)
+    val lines = buildList {
+        add("camera %.1f fps · analysed %.1f fps · %d frames".format(camFps, ui.fps, ui.frames))
+        add("picture %.0f ms · AI %.0f ms · after %.0f ms · %s (%s)".format(ui.msPrep, ui.msAi, ui.msPost, ui.model, ui.modelKey))
+        add(
+            "frame ${ui.frameW}×${ui.frameH} · area %.0f%%×%.0f%% · %d found · %d tracked%s".format(
+                ui.roi[2] * 100, ui.roi[3] * 100, ui.raw.size, ui.boxes.size, if (ui.idle) " · idle" else "",
+            ),
+        )
+        add(enginesText(listOf(Model.VEH_TINY, Model.VEH_NANO).filter { App.instance.engine.isLoaded(it) }))
+        health?.let { add(it.text()) }
+    }
+    DebugStrip(lines, ui.times, modifier)
 }

@@ -112,7 +112,12 @@ class CameraHost(private val context: Context) : LifecycleOwner {
 
     private var provider: ProcessCameraProvider? = null
     private var loading = false
+
+    @Volatile
     private var view: PreviewView? = null
+
+    /** A screen is showing the camera (rather than it running only in the background). */
+    val hasScreen: Boolean get() = view != null
     private var surfaceView: PreviewView? = null
     private var shown: CameraUse? = null
     private var bound: CameraUse? = null

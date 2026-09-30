@@ -1,6 +1,24 @@
 package io.github.ndev.roadsight.settings
 
 import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material3.Icon
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.core.content.ContextCompat
+import io.github.ndev.roadsight.data.Backup
+import io.github.ndev.roadsight.debug.DebugLog
+import io.github.ndev.roadsight.debug.DebugScreen
+import io.github.ndev.roadsight.debug.copy
+import io.github.ndev.roadsight.debug.diagnostics
+import io.github.ndev.roadsight.history.dayLabel
+import io.github.ndev.roadsight.plates.WatchlistScreen
+import io.github.ndev.roadsight.plates.Watchlist
+import io.github.ndev.roadsight.service.BackgroundService
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
@@ -69,11 +87,69 @@ fun SettingsScreen() {
     val app = App.instance
     val p = app.prefs
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var confirm by remember { mutableStateOf<String?>(null) }
     var askStrip by remember { mutableStateOf(false) }
+    var page by rememberSaveable { mutableStateOf("") }
+    var working by remember { mutableStateOf<String?>(null) }
+    var restoring by remember { mutableStateOf<Backup.Checked?>(null) }
+    val watchRows by app.watch.rows.collectAsState()
+    val update by app.updates.available.collectAsState()
+    val checking by app.updates.checking.collectAsState()
+    val logVersion by DebugLog.version.collectAsState()
+
+    val backupTo = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        working = "Backing up…"
+        scope.launch {
+            val r = withContext(app.ioDispatcher) { runCatching { Backup.openOut(app, uri).use { Backup.write(app, it) } } }
+            working = null
+            Toast.makeText(
+                context,
+                r.fold({ "Backed up: ${it.text()}" }, { "Couldn’t back up: ${it.message}" }),
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
+    val restoreFrom = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        working = "Reading the backup…"
+        scope.launch {
+            val r = withContext(app.ioDispatcher) { runCatching { Backup.openIn(app, uri).use { Backup.check(app, it) } } }
+            working = null
+            r.onSuccess { restoring = it }.onFailure { Toast.makeText(context, it.message ?: "That file can’t be restored", Toast.LENGTH_LONG).show() }
+        }
+    }
+
+    when (page) {
+        "watch" -> {
+            WatchlistScreen(onClose = { page = "" })
+            return
+        }
+        "log" -> {
+            DebugScreen(onClose = { page = "" })
+            return
+        }
+    }
 
     Column(Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
         Text("Settings", color = C.text, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp))
+
+        update?.let { u ->
+            Card(Modifier.padding(top = 12.dp)) {
+                Text("RoadSight ${u.version} is out", color = C.sky, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    "You have ${BuildConfig.VERSION_NAME}. Download it, then open the file to install it over this one: history, counts and settings stay.",
+                    color = C.muted, fontSize = 12.5.sp, modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { open(context, u.apk) }, colors = ButtonDefaults.buttonColors(containerColor = C.sky, contentColor = C.bg)) {
+                        Text("Download", fontWeight = FontWeight.Bold)
+                    }
+                    TextButton(onClick = { open(context, u.page) }) { Text("What’s new", color = C.sky) }
+                }
+            }
+        }
 
         SectionTitle("READING PLATES")
         Card {
@@ -87,6 +163,12 @@ fun SettingsScreen() {
                 Segmented(listOf("auto" to "Auto", "fast" to "Fast", "balanced" to "Balanced", "sharp" to "Sharp"), p.quality) { p.quality = it }
             }
             SwitchRow("Vibrate on a new plate or count", checked = p.haptics) { p.haptics = it }
+            val watched = watchRows.count { it.mode == Watchlist.WATCH }
+            val ignored = watchRows.size - watched
+            NavRow(
+                "Watchlist and my cars",
+                "$watched watched, $ignored ignored. A notification when a watched plate is seen; your own cars are left out of history.",
+            ) { page = "watch" }
         }
 
         SectionTitle("COUNTING TRAFFIC")
@@ -147,9 +229,48 @@ fun SettingsScreen() {
             Text(
                 "The camera picture is analysed on this phone and thrown away. RoadSight keeps only what you see in History: " +
                     "plates you scanned (with a small photo if you choose) and, for traffic, what passed and when. No video, and no " +
-                    "number plates of traffic. Nothing leaves the phone unless you share it.",
+                    "number plates of traffic. Nothing leaves the phone unless you share it or back it up (the only thing RoadSight " +
+                    "asks the internet is whether there’s an update, if you allow it below).",
                 color = C.muted, fontSize = 12.5.sp, modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
             )
+        }
+
+        SectionTitle("BACKUP")
+        Card {
+            Text(
+                "One file with your plate history (and photos), counting sessions, watchlist and settings. For a new phone, or to keep a copy.",
+                color = C.muted, fontSize = 12.5.sp,
+            )
+            Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { backupTo.launch(Backup.fileName()) }, enabled = working == null, modifier = Modifier.weight(1f)) { Text("Back up") }
+                OutlinedButton(
+                    onClick = {
+                        if (app.traffic.ui.value.running || BackgroundService.mode.value != null) {
+                            Toast.makeText(context, "Stop counting or watching first", Toast.LENGTH_SHORT).show()
+                        } else {
+                            restoreFrom.launch(arrayOf("application/zip", "application/octet-stream", "application/x-zip-compressed"))
+                        }
+                    },
+                    enabled = working == null,
+                    modifier = Modifier.weight(1f),
+                ) { Text("Restore") }
+            }
+            working?.let { Text(it, color = C.muted, fontSize = 12.5.sp, modifier = Modifier.padding(top = 6.dp)) }
+        }
+
+        SectionTitle("DEVELOPER")
+        Card {
+            SwitchRow(
+                "Debug mode",
+                "Shows what the AI finds in each frame and how long each step takes, on the Plates and Traffic screens.",
+                checked = p.debug,
+            ) {
+                p.debug = it
+                DebugLog.add("app", "Debug mode ${if (it) "on" else "off"}")
+            }
+            val lines = remember(logVersion) { DebugLog.entries().size }
+            NavRow("Debug log", "$lines line${if (lines == 1) "" else "s"}: what the app did, for a bug report.") { page = "log" }
+            TextButton(onClick = { copy(context, "RoadSight diagnostics", diagnostics(context)) }) { Text("Copy diagnostics", color = C.mint) }
         }
 
         SectionTitle("ABOUT")
@@ -170,8 +291,28 @@ fun SettingsScreen() {
                     "Runtime: ONNX Runtime (MIT). Speeds are estimates from the time between the two lines.",
                 color = C.muted, fontSize = 12.5.sp,
             )
-            Row(Modifier.padding(top = 6.dp)) {
-                TextButton(onClick = { open(context, RELEASES) }) { Text("Check for updates", color = C.mint) }
+            SwitchRow(
+                "Check for updates",
+                "Once a day, asks GitHub whether there’s a newer RoadSight. Nothing else is sent.",
+                checked = p.updateCheck,
+            ) {
+                p.updateCheck = it
+                if (it) app.updates.checkIfDue()
+            }
+            Row(Modifier.padding(top = 2.dp)) {
+                TextButton(
+                    onClick = {
+                        val main = ContextCompat.getMainExecutor(context)
+                        app.updates.check { r ->
+                            main.execute {
+                                val msg = r.fold({ rel -> if (rel != null) "RoadSight ${rel.version} is out" else "You have the latest version" }, { "Couldn’t check: ${it.message}" })
+                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    enabled = !checking,
+                ) { Text(if (checking) "Checking…" else "Check now", color = C.mint) }
+                TextButton(onClick = { open(context, RELEASES) }) { Text("All releases", color = C.mint) }
                 TextButton(onClick = { open(context, WEB) }) { Text("Web versions", color = C.mint) }
             }
         }
@@ -199,6 +340,26 @@ fun SettingsScreen() {
                 Toast.makeText(context, "All counts deleted", Toast.LENGTH_SHORT).show()
             }
             confirm = null
+        }
+    }
+    restoring?.let { b ->
+        Confirm(
+            "Restore this backup?",
+            "From RoadSight ${b.summary.version}${if (b.summary.created > 0) ", " + dayLabel(b.summary.created) else ""}: ${b.summary.text()}. " +
+                "It replaces the history, counts, watchlist and settings on this phone.",
+            "Restore",
+            onDismiss = {
+                b.db.delete()
+                restoring = null
+            },
+        ) {
+            restoring = null
+            working = "Restoring…"
+            scope.launch {
+                val r = withContext(app.ioDispatcher) { runCatching { Backup.restore(app, b) } }
+                working = null
+                Toast.makeText(context, r.fold({ "Restored: ${b.summary.text()}" }, { "Couldn’t restore: ${it.message}" }), Toast.LENGTH_LONG).show()
+            }
         }
     }
     if (askStrip) {
@@ -323,5 +484,17 @@ private fun SpeedResults(results: List<SpeedResult>) {
                 )
             }
         }
+    }
+}
+
+/** A row that opens another page. */
+@Composable
+private fun NavRow(title: String, sub: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = C.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(sub, color = C.muted, fontSize = 12.5.sp, modifier = Modifier.padding(top = 2.dp))
+        }
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = C.muted)
     }
 }

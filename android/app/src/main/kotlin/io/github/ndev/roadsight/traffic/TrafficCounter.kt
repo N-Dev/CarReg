@@ -7,6 +7,7 @@ import io.github.ndev.roadsight.ai.BitmapFrame
 import io.github.ndev.roadsight.ai.Model
 import io.github.ndev.roadsight.camera.FrameSink
 import io.github.ndev.roadsight.core.traffic.Counter
+import io.github.ndev.roadsight.core.traffic.Det
 import io.github.ndev.roadsight.core.traffic.Event
 import io.github.ndev.roadsight.core.traffic.Kinds
 import io.github.ndev.roadsight.core.traffic.Lines
@@ -18,8 +19,20 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.math.abs
 import kotlin.math.hypot
 
-/** A road user on the live picture: box as fractions of the frame, label, whether it's been counted. */
-class RoadBox(val box: DoubleArray, val label: String, val counted: Boolean, val flash: Boolean)
+/**
+ * A road user on the live picture: box as fractions of the frame, label, whether it's been counted; and
+ * for debug mode its track number, speed across the picture (fractions a millisecond) and sightings.
+ */
+class RoadBox(
+    val box: DoubleArray,
+    val label: String,
+    val counted: Boolean,
+    val flash: Boolean,
+    val id: Int = 0,
+    val vx: Double = 0.0,
+    val vy: Double = 0.0,
+    val hits: Int = 0,
+)
 
 /** The last road user counted, for the pill above the counts. */
 class LastCounted(val kind: String, val speed: Double?)
@@ -45,6 +58,13 @@ data class TrafficUi(
     val counted: Long = 0,
     /** Frames analysed since the app started. */
     val frames: Long = 0,
+    /** Debug mode: what the finder found this frame (before tracking), recent frame times, and sizes. */
+    val raw: List<Det> = emptyList(),
+    val times: List<Float> = emptyList(),
+    val frameW: Int = 0,
+    val frameH: Int = 0,
+    val msPost: Double = 0.0,
+    val modelKey: String = "",
 )
 
 fun emptyTotals(): Map<String, IntArray> = Kinds.ORDER.associateWith { IntArray(3) }
@@ -76,6 +96,7 @@ class TrafficCounter(private val app: App) : FrameSink {
     private val flash = HashMap<Int, Long>()
     private var model: Model = Model.VEH_TINY
     private val recent = ArrayList<Double>()
+    private val times = ArrayDeque<Float>()
 
     init {
         for (k in Kinds.ORDER) totals[k] = IntArray(3)
@@ -136,7 +157,8 @@ class TrafficCounter(private val app: App) : FrameSink {
         sessionId?.let { id -> app.io.execute { runCatching { app.db.endSession(id, System.currentTimeMillis()) } } }
     }
 
-    override fun wants(timeMs: Double): Boolean = timeMs >= nextAt
+    // While the speed test runs, the picture pauses unless a session is being counted.
+    override fun wants(timeMs: Double): Boolean = timeMs >= nextAt && (running || !app.engine.testing)
 
     override fun onFrame(bitmap: Bitmap, timeMs: Double) {
         synchronized(lock) { analyse(bitmap, timeMs) }
@@ -189,8 +211,17 @@ class TrafficCounter(private val app: App) : FrameSink {
         recent.add(res.msInfer)
         if (recent.size > 40) recent.removeAt(0)
         if (p.trafficModel == "auto" && model == Model.VEH_TINY && recent.size >= 30 && recent.sorted()[recent.size / 2] > 70) {
+            DebugLog.add("traffic", "Switched to the light model: the standard one took ${recent.sorted()[recent.size / 2].toInt()} ms a frame")
             model = Model.VEH_NANO
             recent.clear()
+        }
+        val debug = p.debug
+        if (debug) {
+            times.addLast(res.msTotal.toFloat())
+            while (times.size > 90) times.removeFirst()
+            for (tr in out.counted) DebugLog.add("traffic", "Counted #${tr.id} ${tr.kind ?: "?"} going ${if (tr.dir == 1) "A→B" else "B→A"}")
+        } else if (times.isNotEmpty()) {
+            times.clear()
         }
         val cool = p.trafficPace == "cool"
         val gap = if (idle) (if (cool) 333.0 else 125.0) else (if (cool) 100.0 else 0.0)
@@ -199,7 +230,7 @@ class TrafficCounter(private val app: App) : FrameSink {
             val kind = tr.kind ?: "car"
             val speed = if (tr.counted) c.speedOf(tr) else null
             val label = (Kinds[kind]?.one ?: kind) + (speed?.let { " ${it.toInt()} km/h" } ?: "")
-            RoadBox(tr.box, label, tr.counted, (flash[tr.id]?.let { now - it < 600 }) == true)
+            RoadBox(tr.box, label, tr.counted, (flash[tr.id]?.let { now - it < 600 }) == true, tr.id, tr.vx, tr.vy, tr.hits)
         }
         if (flash.size > 50) flash.entries.removeIf { now - it.value > 2000 }
         ui.value = ui.value.copy(
@@ -218,6 +249,12 @@ class TrafficCounter(private val app: App) : FrameSink {
             last = last,
             counted = if (out.counted.isNotEmpty()) now else ui.value.counted,
             frames = ui.value.frames + 1,
+            raw = if (debug) res.dets else emptyList(),
+            times = if (debug) times.toList() else emptyList(),
+            frameW = res.width,
+            frameH = res.height,
+            msPost = res.msPost,
+            modelKey = model.key,
         )
     }
 
@@ -229,6 +266,15 @@ class TrafficCounter(private val app: App) : FrameSink {
         for (e in events) totals[e.kind]?.let { it[0]++; it[e.dir]++ }
         val r = records.last()
         last = LastCounted(r.kind, r.speed)
+        if (app.prefs.debug) {
+            for (e in records) {
+                DebugLog.add(
+                    "traffic",
+                    "Saved ${e.kind} ${if (e.dir == 1) "A→B" else "B→A"}" + (e.speed?.let { " $it km/h" } ?: " (no speed)") +
+                        (e.length?.let { ", $it m" } ?: "") + " · ${e.frames} frames, ${Math.round(e.conf * 100)}%",
+                )
+            }
+        }
         val id = sessionId ?: return
         app.io.execute {
             runCatching { app.db.addEvents(id, events) }

@@ -73,6 +73,7 @@ import io.github.ndev.roadsight.core.plate.Formats
 import io.github.ndev.roadsight.core.plate.PlatePipeline
 import io.github.ndev.roadsight.core.plate.PlateResult
 import io.github.ndev.roadsight.core.plate.vote
+import io.github.ndev.roadsight.debug.DebugLog
 import io.github.ndev.roadsight.ui.C
 import io.github.ndev.roadsight.ui.Ic
 import io.github.ndev.roadsight.ui.PlateGraphic
@@ -81,8 +82,8 @@ import kotlinx.coroutines.withContext
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-/** A plate found in a photo: its reading, where it is, and a crop of it. */
-class PhotoPlate(val result: PlateResult, val box: DoubleArray, val thumb: Bitmap?)
+/** A plate found in a photo: its reading, where it is, a crop of it, and whether it's watched or ignored. */
+class PhotoPlate(val result: PlateResult, val box: DoubleArray, val thumb: Bitmap?, val mode: String? = null)
 
 private sealed class PhotoState {
     data object Loading : PhotoState()
@@ -227,6 +228,10 @@ private fun PhotoCard(n: Int, p: PhotoPlate, onClick: () -> Unit) {
                 "${(r.score * 100).roundToInt()}% sure",
             )
             Text(bits.joinToString(" · "), color = C.muted, fontSize = 12.5.sp, modifier = Modifier.padding(top = 4.dp))
+            when (p.mode) {
+                Watchlist.WATCH -> Text("On your watchlist" + (App.instance.watch.rowFor(r.key)?.label?.takeIf { it.isNotEmpty() }?.let { ": $it" } ?: ""), color = C.sky, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+                Watchlist.IGNORE -> Text("One of your cars: not saved", color = C.muted, fontSize = 12.5.sp)
+            }
         }
     }
 }
@@ -274,11 +279,16 @@ private fun read(app: App, bmp: Bitmap): PhotoState {
         val reads = b.reads ?: return@mapNotNull null
         val r = vote(reads, prefs.format, 0.2) ?: return@mapNotNull null
         if (r.key.length < 3 || r.prob < 0.35) return@mapNotNull null
-        PhotoPlate(r, b.box, crop(bmp, b.box))
+        val thumb = crop(bmp, b.box)
+        val mode = app.watch.modeOf(r.key)
+        if (mode == Watchlist.WATCH) app.watch.seen(r, thumb, "photo")
+        PhotoPlate(r, b.box, thumb, mode)
     }.sortedWith(compareBy<PhotoPlate>({ it.box[0] }, { it.box[1] }))
+    DebugLog.add("photo", "${found.size} plate(s) in a ${bmp.width}x${bmp.height} photo in ${res.msTotal.toInt()} ms${if (res.tiles != null) " (deep scan)" else ""}: ${found.joinToString { it.result.text }}")
     if (prefs.history) {
         val keep = prefs.keepPhotos
-        val saves = found.map { it.result to (if (keep) it.thumb?.let { t -> PlateScanner.jpeg(t) } else null) }
+        // Your own cars (the ignore list) aren't kept.
+        val saves = found.filter { it.mode != Watchlist.IGNORE }.map { it.result to (if (keep) it.thumb?.let { t -> PlateScanner.jpeg(t) } else null) }
         app.io.execute {
             for ((r, jpg) in saves) runCatching { app.db.savePlate(r, "photo", jpg) }
             app.dataChanged()

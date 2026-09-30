@@ -18,6 +18,7 @@ import io.github.ndev.roadsight.core.plate.PlateBox
 import io.github.ndev.roadsight.core.plate.PlatePipeline
 import io.github.ndev.roadsight.core.plate.vote
 import io.github.ndev.roadsight.core.traffic.VehicleDetector
+import io.github.ndev.roadsight.debug.DebugLog
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.util.EnumSet
 
@@ -73,6 +74,10 @@ class Engine(private val app: App) {
 
     /** Problems worth showing, e.g. "NNAPI isn't available, using the CPU". */
     val notice = MutableStateFlow<String?>(null)
+
+    /** The speed test is running: live scanning pauses so it doesn't slow the test down (counting doesn't). */
+    @Volatile
+    var testing = false
 
     val cores: Int = Runtime.getRuntime().availableProcessors()
     val defaultThreads: Int = minOf(4, cores)
@@ -132,13 +137,19 @@ class Engine(private val app: App) {
             cur.second.close()
         }
         val bytes = modelBytes(m)
+        val t0 = System.nanoTime()
         val net = try {
             create(m, cfg, bytes)
         } catch (e: Throwable) {
-            if (cfg.accel == Accel.CPU) throw e
+            if (cfg.accel == Accel.CPU) {
+                DebugLog.error("engine", "The ${m.label.lowercase()} couldn't load", e)
+                throw e
+            }
+            DebugLog.error("engine", "${cfg.accel.label} couldn't run the ${m.label.lowercase()}, using the CPU", e)
             notice.value = "${cfg.accel.label} couldn’t run the ${m.label.lowercase()}, so it’s using the CPU"
             create(m, RunConfig(Accel.CPU, cfg.threads), bytes)
         }
+        DebugLog.add("engine", "Loaded the ${m.label.lowercase()} (${m.key}) with ${cfg.label} in ${(System.nanoTime() - t0) / 1_000_000} ms")
         nets[m] = cfg to net
         return net
     }
@@ -151,6 +162,7 @@ class Engine(private val app: App) {
     fun release(keep: Set<Model>) {
         val drop = nets.keys.filter { it !in keep }
         for (m in drop) nets.remove(m)?.second?.close()
+        if (drop.isNotEmpty()) DebugLog.add("engine", "Freed ${drop.joinToString { it.key }}")
     }
 
     fun releaseAll() = release(emptySet())
@@ -209,6 +221,16 @@ class SpeedTest(private val app: App) {
     }
 
     fun run(models: List<Model>, progress: (String) -> Unit): List<SpeedResult> {
+        engine.testing = true
+        try {
+            return runAll(models, progress)
+        } finally {
+            engine.testing = false
+        }
+    }
+
+    private fun runAll(models: List<Model>, progress: (String) -> Unit): List<SpeedResult> {
+        DebugLog.add("engine", "Speed test started")
         val sample = app.assets.open("samples/car_ie.jpg").use { BitmapFactory.decodeStream(it) }
         val frame = BitmapFrame(sample)
         val pipe = PlatePipeline(engine.ocrConfig)
@@ -227,6 +249,7 @@ class SpeedTest(private val app: App) {
             }
         }
         sample.recycle()
+        DebugLog.add("engine", "Speed test ${if (cancelled) "stopped" else "finished"}: " + out.joinToString { "${it.model.key} ${it.cfg} ${it.ms?.let { ms -> "%.0f ms".format(ms) } ?: "-"}${if (it.ok) "" else " (${it.note})"}" })
         return out
     }
 
@@ -267,6 +290,7 @@ class SpeedTest(private val app: App) {
     /** Saves the fastest correct setup per model (used when the accelerator setting is Auto). */
     fun useFastest(results: List<SpeedResult>) {
         val best = results.filter { it.ok && it.ms != null }.groupBy { it.model }.mapValues { (_, v) -> v.minBy { it.ms!! }.cfg }
+        DebugLog.add("engine", "Speed test: using ${best.entries.joinToString { "${it.key.key} ${it.value}" }}")
         app.prefs.tuned = Json.write(best.map { (m, c) -> m.key to c.toString() }.toMap())
         app.prefs.accel = "auto"
         app.prefs.threads = 0

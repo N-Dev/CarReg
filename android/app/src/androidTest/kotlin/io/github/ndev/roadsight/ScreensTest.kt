@@ -12,6 +12,7 @@ import android.graphics.Paint
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -23,12 +24,19 @@ import io.github.ndev.roadsight.core.traffic.Lines
 import io.github.ndev.roadsight.core.traffic.Report
 import io.github.ndev.roadsight.core.traffic.ReportSession
 import io.github.ndev.roadsight.core.traffic.Stats
+import io.github.ndev.roadsight.core.traffic.Event
+import io.github.ndev.roadsight.data.Backup
 import io.github.ndev.roadsight.data.Share
+import io.github.ndev.roadsight.debug.DebugLog
+import io.github.ndev.roadsight.plates.Watchlist
 import io.github.ndev.roadsight.service.BackgroundService
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.ExternalResource
+import java.util.concurrent.Callable
 import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 import kotlin.math.abs
@@ -39,8 +47,19 @@ import kotlin.math.roundToInt
 class ScreensTest {
     private val compose = createAndroidComposeRule<MainActivity>()
 
+    /** Before the app opens: no speed test offer or update check in the way, debug mode off. */
+    private val quiet = object : ExternalResource() {
+        override fun before() {
+            val p = App.instance.prefs
+            p.speedTestOffered = true
+            p.updateCheck = false
+            p.debug = false
+        }
+    }
+
     @get:Rule
-    val rules: RuleChain = RuleChain.outerRule(GrantPermissionRule.grant(Manifest.permission.CAMERA, Manifest.permission.POST_NOTIFICATIONS)).around(compose)
+    val rules: RuleChain = RuleChain.outerRule(GrantPermissionRule.grant(Manifest.permission.CAMERA, Manifest.permission.POST_NOTIFICATIONS))
+        .around(quiet).around(compose)
 
     private val app: App get() = App.instance
 
@@ -176,7 +195,8 @@ class ScreensTest {
             Shots.take("17-traffic-landscape")
             compose.onNodeWithText("Set up").performClick()
             waitForText("Away from me")
-            compose.onNodeWithText("Away from me").performClick()
+            // The set-up form scrolls (the landscape panel is short): bring the choice into view first.
+            compose.onNodeWithText("Away from me").performScrollTo().performClick()
             waitForText("Towards me")
             settle()
             Shots.take("18-road-away")
@@ -279,6 +299,163 @@ class ScreensTest {
         settle()
         Shots.take("08-report-dialog")
         compose.onNodeWithText("Close").performClick()
+    }
+
+    /**
+     * The watchlist: a watched plate read by the live scanner gives a notification and a banner; an
+     * ignored one (my car) isn't kept or shown. Frames of the sample car go straight to the scanner (the
+     * emulator's camera shows a test pattern), with the camera off on the History tab.
+     */
+    @Test
+    fun watchlistNotifiesAndIgnores() {
+        val w = app.watch
+        val plates = app.plates
+        val key = "241D12345"
+        compose.onNodeWithTag("tab-history").performClick()
+        waitForText("Traffic counts")
+        settle()
+        w.set("241-D-12345", "Test car", Watchlist.WATCH)
+        compose.waitUntil(10_000) { w.rowFor(key)?.mode == Watchlist.WATCH }
+        try {
+            val car = Shots.sample("car_ie.jpg")
+            w.lastHit.value = null
+            plates.start()
+            var t = 100_000.0
+            for (i in 0 until 40) {
+                if (w.lastHit.value != null) break
+                plates.onFrame(car, t)
+                t += 120
+            }
+            val hit = w.lastHit.value
+            assertNotNull("the watched plate was seen", hit)
+            assertEquals(key, hit!!.row.key)
+            val nm = app.getSystemService(NotificationManager::class.java)
+            val id = 1000 + (key.hashCode() and 0xffff)
+            compose.waitUntil(10_000) { nm.activeNotifications.any { it.id == id } }
+            Shots.log("watchlist: ${hit.text} seen, notification shown")
+            plates.stop()
+
+            // My car: never kept or shown.
+            w.set("241-D-12345", "", Watchlist.IGNORE)
+            compose.waitUntil(10_000) { w.ignored(key) }
+            plates.clearTray()
+            Thread.sleep(500)
+            val before = app.db.plate(key)?.count ?: 0
+            plates.start()
+            for (i in 0 until 8) {
+                plates.onFrame(car, t)
+                t += 120
+            }
+            plates.stop()
+            Thread.sleep(800)
+            assertTrue("an ignored plate isn't in the tray", plates.ui.value.tray.none { it.key == key })
+            assertEquals("an ignored plate isn't saved", before, app.db.plate(key)?.count ?: 0)
+
+            // The banner on the Plates screen, and the lists.
+            w.set("241-D-12345", "Test car", Watchlist.WATCH)
+            compose.waitUntil(10_000) { w.rowFor(key)?.mode == Watchlist.WATCH }
+            compose.onNodeWithTag("tab-plates").performClick()
+            settle(2000)
+            w.lastHit.value = Watchlist.Hit(w.rowFor(key)!!, hit.text, System.currentTimeMillis())
+            waitForText("Test car is here", timeoutMs = 10_000)
+            Shots.take("20-watch-hit")
+            compose.onNodeWithContentDescription("More").performClick()
+            compose.onNodeWithText("Watchlist and my cars").performClick()
+            waitForText("Watching for")
+            settle()
+            Shots.take("21-watchlist")
+            compose.onNodeWithContentDescription("Back").performClick()
+            waitForText("Point the camera", substring = true)
+        } finally {
+            w.remove(key)
+            plates.clearTray()
+        }
+    }
+
+    /** Debug mode: the finder's boxes and the timings over the picture, and the log. */
+    @Test
+    fun debugModeShowsWhatTheAiSees() {
+        val p = app.prefs
+        p.debug = true
+        try {
+            waitForText("analysed", substring = true)
+            settle(3000)
+            Shots.take("22-debug-plates")
+            compose.onNodeWithTag("tab-traffic").performClick()
+            waitForText("Start counting")
+            compose.waitUntil(60_000) { app.traffic.ui.value.ready }
+            waitForText("ms · AI", substring = true)
+            settle(3000)
+            Shots.take("23-debug-traffic")
+            compose.onNodeWithTag("tab-settings").performClick()
+            waitForText("DEVELOPER")
+            compose.onNodeWithText("Debug log").performScrollTo().performClick()
+            waitForText("Problems")
+            settle()
+            Shots.take("24-debug-log")
+            assertTrue("models loaded are logged", DebugLog.entries().any { it.cat == "engine" && it.msg.startsWith("Loaded") })
+            compose.onNodeWithContentDescription("Back").performClick()
+            waitForText("DEVELOPER")
+        } finally {
+            p.debug = false
+        }
+    }
+
+    /** A backup holds the history, counts, watchlist and settings, and restoring it puts them back. */
+    @Test
+    fun backupAndRestore() {
+        val p = app.prefs
+        val db = app.db
+        val site = p.site
+        db.setWatch("ZZ99ZZZ", "ZZ99 ZZZ", "Backup test", Watchlist.WATCH)
+        val sid = db.newSession("Backup road", 1_700_000_000_000, 20.0, 50, "Left to right", "Right to left", Lines.default(), "vehNano")
+        db.addEvents(sid, listOf(Event(1_700_000_001_000, "car", 1, 42.0, 4.3), Event(1_700_000_002_000, "bicycle", 2, null, null)))
+        p.site = "Before the backup"
+        try {
+            val bytes = app.io.submit(Callable { java.io.ByteArrayOutputStream().also { Backup.write(app, it) }.toByteArray() }).get()
+            Shots.log("backup: ${bytes.size} bytes")
+            // Change everything, then restore.
+            db.removeWatch("ZZ99ZZZ")
+            db.deleteSession(sid)
+            p.site = "After the backup"
+            val checked = app.io.submit(Callable { Backup.check(app, java.io.ByteArrayInputStream(bytes)) }).get()
+            Shots.log("backup holds: ${checked.summary.text()}")
+            assertTrue(checked.summary.sessions >= 1 && checked.summary.watch >= 1)
+            app.io.submit(Callable { Backup.restore(app, checked) }).get()
+            assertEquals("Before the backup", p.site)
+            assertNotNull(db.watchList().firstOrNull { it.key == "ZZ99ZZZ" })
+            assertEquals(2, db.events(sid).size)
+            // Anything else is refused.
+            assertTrue(runCatching { Backup.check(app, java.io.ByteArrayInputStream("not a backup".toByteArray())) }.isFailure)
+
+            compose.onNodeWithTag("tab-settings").performClick()
+            waitForText("BACKUP")
+            compose.onNodeWithText("Back up").performScrollTo()
+            settle()
+            Shots.take("25-settings-backup")
+        } finally {
+            db.removeWatch("ZZ99ZZZ")
+            db.deleteSession(sid)
+            p.site = site
+            app.watch.load()
+        }
+    }
+
+    /** At first launch the speed test is offered once. */
+    @Test
+    fun speedTestOfferedOnce() {
+        val p = app.prefs
+        p.speedTestOffered = false
+        try {
+            waitForText("Make RoadSight as quick as it can be?", timeoutMs = 10_000)
+            settle()
+            Shots.take("26-speed-offer")
+            compose.onNodeWithText("Not now").performClick()
+            compose.waitUntil(5_000) { p.speedTestOffered }
+            compose.waitUntil(5_000) { compose.onAllNodesWithText("Make RoadSight as quick as it can be?").fetchSemanticsNodes().isEmpty() }
+        } finally {
+            p.speedTestOffered = true
+        }
     }
 
     private fun crop(b: Bitmap, x: Int, y: Int, w: Int, h: Int): Bitmap = Bitmap.createBitmap(b, x, y, minOf(w, b.width - x), minOf(h, b.height - y))
