@@ -69,7 +69,7 @@ export function councilReport(session, s, { app = '', release = '' } = {}) {
     ['Motor vehicles', fmt(s.motor), rate(s)],
     ['Busiest hour', s.peak ? fmt(s.peak.motor) : '–', s.peak ? `${hh(s.peak.start)}:00 to ${pad((new Date(s.peak.start).getHours() + 1) % 24)}:00` : 'no vehicles'],
     ['85% drove at or under', sp.n ? `${Math.round(sp.p85)} km/h` : '–', sp.n ? `from ${fmt(sp.n)} speeds measured` : 'no speeds measured'],
-    [`Over the ${s.limit} km/h limit`, sp.n ? `${sp.overPct}%` : '–', sp.n ? `${fmt(sp.over)} vehicles` : ''],
+    [`Over the ${s.limit} km/h limit`, sp.n ? `${sp.overPct}%` : '–', sp.n ? `${fmt(sp.over)} vehicle${sp.over === 1 ? '' : 's'}` : ''],
   ];
   const tw = (A4.w - 2 * M) / tiles.length;
   tiles.forEach(([label, value, sub], i) => {
@@ -272,7 +272,10 @@ function speedChart(pdf, x, y, w, h, s) {
   if (sp.n) {
     const qx = xAt(sp.p85);
     pdf.line(qx, y + 10, qx, y + h, { color: INK, width: 0.8 });
-    pdf.text(qx + 3, y + 16, `85% at or under ${Math.round(sp.p85)}`, { size: 7.5, color: INK });
+    const label = `85% at or under ${Math.round(sp.p85)}`;
+    // Near the right edge, the label goes on the line's left.
+    if (qx + 3 + textWidth(label, 7.5) > px + pw) pdf.text(qx - 3, y + 16, label, { size: 7.5, color: INK, align: 'right' });
+    else pdf.text(qx + 3, y + 16, label, { size: 7.5, color: INK });
   }
   return y + h + 22;
 }

@@ -124,7 +124,8 @@ fun TrafficScreen() {
     val ui by app.traffic.ui.collectAsState()
     val notice by app.engine.notice.collectAsState()
     val prefsVersion by prefs.version.collectAsState()
-    val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val config = LocalConfiguration.current
+    val landscape = config.orientation == Configuration.ORIENTATION_LANDSCAPE
     val snack = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
@@ -333,7 +334,9 @@ fun TrafficScreen() {
         } else {
             Column(Modifier.fillMaxSize()) {
                 stage(Modifier.weight(1f).fillMaxWidth())
-                panel(Modifier.fillMaxWidth().heightIn(max = if (editing) 420.dp else 360.dp))
+                // The counts take up to 45% of the screen (the set-up form 55%); the picture gets the rest.
+                val share = if (editing) 0.55f else 0.45f
+                panel(Modifier.fillMaxWidth().heightIn(max = (config.screenHeightDp * share).dp.coerceAtMost(if (editing) 460.dp else 380.dp)))
             }
         }
 

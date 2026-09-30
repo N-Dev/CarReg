@@ -710,7 +710,7 @@ async function showSession(id) {
     ['Motor vehicles', fmt(sum.motor), rate(sum)],
     ['Busiest hour', sum.peak ? fmt(sum.peak.motor) : '–', sum.peak ? `${pad2(new Date(sum.peak.start).getHours())}:00 to ${pad2((new Date(sum.peak.start).getHours() + 1) % 24)}:00` : ''],
     ['85% at or under', sp.n ? `${Math.round(sp.p85)} km/h` : '–', sp.n ? `${fmt(sp.n)} speeds` : 'no speeds yet'],
-    [`Over ${s.limit} km/h`, sp.n ? `${sp.overPct}%` : '–', sp.n ? `${fmt(sp.over)} vehicles` : ''],
+    [`Over ${s.limit} km/h`, sp.n ? `${sp.overPct}%` : '–', sp.n ? `${fmt(sp.over)} vehicle${sp.over === 1 ? '' : 's'}` : ''],
   ];
   const kinds = ORDER.filter((k) => sum.totals[k].all);
   el.innerHTML = `

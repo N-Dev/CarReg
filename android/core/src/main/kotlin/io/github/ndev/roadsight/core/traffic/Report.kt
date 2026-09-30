@@ -130,7 +130,7 @@ object Report {
                 if (sp.n > 0) "${jsRound(sp.p85)} km/h" else "–",
                 if (sp.n > 0) "from ${fmt(sp.n)} speeds measured" else "no speeds measured",
             ),
-            Triple("Over the ${s.limit} km/h limit", if (sp.n > 0) "${Stats.fmt1(sp.overPct)}%" else "–", if (sp.n > 0) "${fmt(sp.over)} vehicles" else ""),
+            Triple("Over the ${s.limit} km/h limit", if (sp.n > 0) "${Stats.fmt1(sp.overPct)}%" else "–", if (sp.n > 0) "${fmt(sp.over)} vehicle${if (sp.over == 1) "" else "s"}" else ""),
         )
         val tw = (Pdf.W - 2 * M) / tiles.size
         tiles.forEachIndexed { i, (label, value, sub) ->
@@ -356,7 +356,10 @@ object Report {
         if (sp.n > 0) {
             val qx = xAt(sp.p85)
             pdf.line(qx, y + 10, qx, y + h, color = INK, width = 0.8)
-            pdf.text(qx + 3, y + 16, "85% at or under ${jsRound(sp.p85)}", size = 7.5, color = INK)
+            val label = "85% at or under ${jsRound(sp.p85)}"
+            // Near the right edge, the label goes on the line's left.
+            if (qx + 3 + Pdf.textWidth(label, 7.5) > px + pw) pdf.text(qx - 3, y + 16, label, size = 7.5, color = INK, align = Align.RIGHT)
+            else pdf.text(qx + 3, y + 16, label, size = 7.5, color = INK)
         }
         return y + h + 22
     }

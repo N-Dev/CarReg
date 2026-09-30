@@ -6,10 +6,12 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.rule.GrantPermissionRule
 import io.github.ndev.roadsight.core.traffic.Lines
@@ -58,13 +60,48 @@ class ScreensTest {
         waitForText("Set up the counting lines")
         settle()
         Shots.take("03-traffic-setup")
-        compose.onNodeWithText("Done").performClick()
+        compose.onNodeWithText("Done").performScrollTo().performClick()
+        waitForText("Start counting")
         compose.onNodeWithTag("tab-history").performClick()
+        waitForText("Traffic counts")
         settle()
         Shots.take("04-history")
         compose.onNodeWithTag("tab-settings").performClick()
+        waitForText("READING PLATES")
         settle()
         Shots.take("05-settings")
+    }
+
+    /** Counting from the screen: the tabs hide, the clock runs, the screen dims, and Stop offers the results. */
+    @Test
+    fun countingFromTheTrafficScreen() {
+        val p = app.prefs
+        val dim = p.dimAfter
+        p.dimAfter = 3
+        try {
+            compose.onNodeWithTag("tab-traffic").performClick()
+            waitForText("Start counting")
+            compose.waitUntil(60_000) { app.traffic.ui.value.ready }
+            compose.onNodeWithText("Start counting").performClick()
+            waitForText("Stop")
+            settle(1000)
+            Shots.take("09-counting")
+            assertTrue("the tabs are hidden while counting", compose.onAllNodesWithTag("tab-plates").fetchSemanticsNodes().isEmpty())
+            // Dims after 3 s without a touch (1 min normally); a tap wakes it.
+            waitForText("tap to wake", timeoutMs = 15_000, substring = true)
+            Shots.take("10-dimmed")
+            compose.onNodeWithText("tap to wake", substring = true).performClick()
+            waitForText("Stop")
+            compose.onNodeWithText("Stop").performClick()
+            waitForText("See results")
+            Shots.take("11-stopped")
+            compose.onNodeWithText("See results").performClick()
+            waitForText("Report for the council (PDF)")
+            settle()
+            Shots.take("12-results")
+        } finally {
+            p.dimAfter = dim
+        }
     }
 
     @Test
@@ -141,7 +178,7 @@ class ScreensTest {
         waitForText("Report for the council (PDF)")
         settle()
         Shots.take("07-session")
-        compose.onNodeWithText("Report for the council (PDF)").performClick()
+        compose.onNodeWithText("Report for the council (PDF)").performScrollTo().performClick()
         waitForText("Share")
         settle()
         Shots.take("08-report-dialog")

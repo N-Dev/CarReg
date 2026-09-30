@@ -453,7 +453,7 @@ private fun SessionBody(d: Loaded, counting: Boolean, onExport: (Pair<String, By
         Triple("Motor vehicles", Report.fmt(sum.motor), Report.rate(sum)),
         Triple("Busiest hour", sum.peak?.let { Report.fmt(it.motor) } ?: "–", sum.peak?.let { Report.hourRange(it.start) } ?: ""),
         Triple("85% at or under", if (sp.n > 0) "${Math.round(sp.p85)} km/h" else "–", if (sp.n > 0) "${Report.fmt(sp.n)} speeds" else "no speeds yet"),
-        Triple("Over ${s.limit} km/h", if (sp.n > 0) "${Stats.fmt1(sp.overPct)}%" else "–", if (sp.n > 0) "${Report.fmt(sp.over)} vehicles" else ""),
+        Triple("Over ${s.limit} km/h", if (sp.n > 0) "${Stats.fmt1(sp.overPct)}%" else "–", if (sp.n > 0) "${Report.fmt(sp.over)} vehicle${if (sp.over == 1) "" else "s"}" else ""),
     )
     for (pair in tiles.chunked(2)) {
         Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

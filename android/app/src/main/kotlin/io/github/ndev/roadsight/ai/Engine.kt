@@ -74,7 +74,10 @@ class Engine(private val app: App) {
         Json.obj(app.prefs.tuned).mapNotNull { (k, v) -> RunConfig.parse(v as? String)?.let { k to it } }.toMap()
     }.getOrElse { emptyMap() }
 
-    /** The setup a model runs with: the one chosen in Settings, or the speed test's pick, or the CPU. */
+    /**
+     * The setup a model runs with: the one chosen in Settings, or the speed test's pick, or XNNPACK (about
+     * twice as fast as ONNX Runtime's own CPU code in tests; it falls back to that if it can't run a model).
+     */
     fun configFor(m: Model): RunConfig {
         val p = app.prefs
         val threads = if (p.threads > 0) p.threads else defaultThreads
@@ -82,7 +85,7 @@ class Engine(private val app: App) {
             val a = runCatching { Accel.valueOf(p.accel) }.getOrDefault(Accel.CPU)
             return RunConfig(a, threads)
         }
-        return tunedConfigs()[m.key] ?: RunConfig(Accel.CPU, threads)
+        return tunedConfigs()[m.key] ?: RunConfig(Accel.XNNPACK, threads)
     }
 
     fun options(cfg: RunConfig): OrtSession.SessionOptions {
