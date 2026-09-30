@@ -15,6 +15,8 @@ import io.github.ndev.roadsight.core.plate.PlateResult
 import io.github.ndev.roadsight.core.plate.Track
 import io.github.ndev.roadsight.core.plate.Tracker
 import io.github.ndev.roadsight.core.plate.TrackerOptions
+import io.github.ndev.roadsight.debug.DebugLog
+import io.github.ndev.roadsight.service.BackgroundService
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.io.ByteArrayOutputStream
 
@@ -62,8 +64,17 @@ class PlateScanner(private val app: App) : FrameSink {
     private val order = HashMap<String, Long>()
     private var counter = 0L
 
+    /** Plates confirmed since the app started (for the background notification). */
+    @Volatile
+    var confirmedCount = 0L
+        private set
+
+    /** Watching for plates with the screen off (the background service is running for it). */
+    val watching: Boolean get() = BackgroundService.mode.value == BackgroundService.PLATES
+
     fun start() {
         synchronized(lock) {
+            if (running) return
             tracker = Tracker(TrackerOptions(format = app.prefs.format))
             adaptive.setMode(app.prefs.quality, 0.0)
             running = true
@@ -80,6 +91,19 @@ class PlateScanner(private val app: App) : FrameSink {
             finish(tracker.flush())
             publishTray()
         }
+    }
+
+    /** Keeps reading plates with the screen off or another app open. Call while the app is on screen. */
+    fun startWatching() {
+        start()
+        BackgroundService.start(app, BackgroundService.PLATES)
+        DebugLog.add("plates", "Watching for plates in the background")
+    }
+
+    /** Stops background watching (scanning goes on while the Plates screen is open). */
+    fun stopWatching() {
+        if (BackgroundService.mode.value == BackgroundService.PLATES) BackgroundService.stop(app)
+        DebugLog.add("plates", "Stopped watching in the background")
     }
 
     fun removeFromTray(key: String) {
@@ -128,6 +152,8 @@ class PlateScanner(private val app: App) : FrameSink {
         for (tr in u.confirmed) {
             app.haptic()
             order[tr.result!!.key] = ++counter
+            confirmedCount++
+            DebugLog.add("plates", "Confirmed ${tr.result!!.text} (${tr.result!!.region ?: "?"}, ${Math.round(tr.result!!.score * 100)}%)")
         }
         finish(u.lost)
         for (tr in tracker.tracks) if (tr.confirmed && tr.result != null) board.put(tr)

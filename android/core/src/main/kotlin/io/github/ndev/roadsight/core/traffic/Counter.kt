@@ -37,10 +37,39 @@ class Det(val cls: String, val score: Double, val box: DoubleArray)
 class Lines(val a: DoubleArray, val b: DoubleArray) {
     fun copy() = Lines(a.copyOf(), b.copyOf())
 
-    companion object {
-        /** Two upright lines across the middle of the picture. */
-        fun default() = Lines(doubleArrayOf(0.35, 0.3, 0.35, 0.95), doubleArrayOf(0.65, 0.3, 0.65, 0.95))
+    /**
+     * Whether the lines lie more level than upright (in pixels; `aspect` = frame height / width): the
+     * road runs away from the camera, so traffic moves up and down the picture rather than across it.
+     */
+    fun level(aspect: Double): Boolean {
+        val dx = abs(a[2] - a[0]) + abs(b[2] - b[0])
+        val dy = (abs(a[3] - a[1]) + abs(b[3] - b[1])) * aspect
+        return dx > dy
     }
+
+    companion object {
+        /** Two upright lines across the middle of the picture: for a road running across it. */
+        fun default() = Lines(doubleArrayOf(0.35, 0.3, 0.35, 0.95), doubleArrayOf(0.65, 0.3, 0.65, 0.95))
+
+        /** Two level lines, the nearer one lower and wider: for a road running away from the camera. */
+        fun away() = Lines(doubleArrayOf(0.25, 0.45, 0.75, 0.45), doubleArrayOf(0.12, 0.75, 0.88, 0.75))
+    }
+}
+
+/**
+ * Names for the two directions from where the lines are. Across the picture: line A left of line B
+ * means A→B is left to right. Away from the camera: line A above (further away than) line B means A→B
+ * is coming towards the camera.
+ */
+fun directionNames(lines: Lines, aspect: Double = 9.0 / 16): Pair<String, String> {
+    if (lines.level(aspect)) {
+        val ay = (lines.a[1] + lines.a[3]) / 2
+        val by = (lines.b[1] + lines.b[3]) / 2
+        return if (ay <= by) "Towards me" to "Away from me" else "Away from me" to "Towards me"
+    }
+    val ax = (lines.a[0] + lines.a[2]) / 2
+    val bx = (lines.b[0] + lines.b[2]) / 2
+    return if (ax <= bx) "Left to right" to "Right to left" else "Right to left" to "Left to right"
 }
 
 /** A counted road user: when (ms), what, which way (1 = A→B, 2 = B→A), speed (km/h) and length (m) if measured. */
@@ -334,8 +363,12 @@ class Counter(
         return if (kmh in 1.0..200.0) kmh else null
     }
 
-    /** Length (m) along the direction of travel, from the box sizes between the lines, if measurable. */
+    /**
+     * Length (m) along the direction of travel, from the box sizes between the lines, if measurable. Not
+     * for a road running away from the camera: there a box's height is mostly the vehicle's front.
+     */
     fun lengthOf(tr: Road): Double? {
+        if (lines.level(aspect)) return null
         val a = tr.cross["a"] ?: return null
         val b = tr.cross["b"] ?: return null
         val t0 = min(a.t, b.t) - 150
@@ -386,6 +419,7 @@ class Counter(
  * picked up before they reach a line. Returned as fractions of the frame: x, y, w, h.
  */
 fun regionFor(lines: Lines, aspect: Double = 9.0 / 16): DoubleArray {
+    if (lines.level(aspect)) return regionForLevel(lines, aspect)
     val xs = doubleArrayOf(lines.a[0], lines.a[2], lines.b[0], lines.b[2])
     val ys = doubleArrayOf(lines.a[1], lines.a[3], lines.b[1], lines.b[3])
     val gap = max(0.12, xs.max() - xs.min())
@@ -405,6 +439,34 @@ fun regionFor(lines: Lines, aspect: Double = 9.0 / 16): DoubleArray {
         val c = (y0 + y1) / 2
         y0 = max(0.0, min(1 - minH, c - minH / 2))
         y1 = y0 + minH
+    }
+    return doubleArrayOf(x0, y0, x1 - x0, y1 - y0)
+}
+
+/**
+ * [regionFor] for a road running away from the camera: room above and below the lines (where traffic
+ * comes from and goes to), and a little either side of them.
+ */
+private fun regionForLevel(lines: Lines, aspect: Double): DoubleArray {
+    val xs = doubleArrayOf(lines.a[0], lines.a[2], lines.b[0], lines.b[2])
+    val ys = doubleArrayOf(lines.a[1], lines.a[3], lines.b[1], lines.b[3])
+    val gap = max(0.12, ys.max() - ys.min())
+    var y0 = max(0.0, ys.min() - 0.6 * gap)
+    var y1 = min(1.0, ys.max() + 0.6 * gap)
+    var x0 = max(0.0, xs.min() - 0.08)
+    var x1 = min(1.0, xs.max() + 0.08)
+    // Never shorter than half the frame: a road user needs a few frames in view before the first line.
+    if (y1 - y0 < 0.5) {
+        val c = (y0 + y1) / 2
+        y0 = max(0.0, min(0.5, c - 0.25))
+        y1 = y0 + 0.5
+    }
+    // Not a thin strip either (in pixels, at least a third as wide as it is tall).
+    val minW = min(1.0, 0.35 * (y1 - y0) * aspect)
+    if (x1 - x0 < minW) {
+        val c = (x0 + x1) / 2
+        x0 = max(0.0, min(1 - minW, c - minW / 2))
+        x1 = x0 + minW
     }
     return doubleArrayOf(x0, y0, x1 - x0, y1 - y0)
 }

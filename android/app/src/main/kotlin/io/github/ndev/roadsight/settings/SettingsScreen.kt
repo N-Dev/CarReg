@@ -103,6 +103,18 @@ fun SettingsScreen() {
             SettingRow("Dim the screen while counting", "Saves battery and heat. Tap to wake.") {
                 Segmented(listOf("0" to "Never", "60" to "After 1 min", "300" to "After 5 min"), p.dimAfter.toString()) { p.dimAfter = it.toInt() }
             }
+            SwitchRow(
+                "Keep counting with the screen off",
+                "Counting carries on if the screen goes off or you open another app. A notification shows meanwhile, with a Stop button.",
+                checked = p.backgroundCounting,
+            ) { p.backgroundCounting = it }
+        }
+
+        SectionTitle("SCREEN")
+        Card {
+            SettingRow("Which way round", "The Traffic tab keeps to the way round its lines were set up.") {
+                Segmented(listOf("auto" to "Turn with phone", "portrait" to "Portrait", "landscape" to "Landscape"), p.orientation) { p.orientation = it }
+            }
         }
 
         SectionTitle("AI ENGINE")

@@ -1,15 +1,14 @@
 package io.github.ndev.roadsight.plates
 
-import android.util.Size
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.core.Camera
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,10 +25,17 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -53,21 +59,27 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.ndev.roadsight.App
 import io.github.ndev.roadsight.CameraGate
+import io.github.ndev.roadsight.camera.CameraHost
 import io.github.ndev.roadsight.camera.CameraPreview
+import io.github.ndev.roadsight.camera.CameraUse
+import io.github.ndev.roadsight.camera.zoomLabel
+import io.github.ndev.roadsight.camera.zoomSteps
+import io.github.ndev.roadsight.service.BackgroundService
+import io.github.ndev.roadsight.ui.rememberNotificationRequest
 import io.github.ndev.roadsight.core.plate.Formats
 import io.github.ndev.roadsight.ui.C
 import io.github.ndev.roadsight.ui.Ic
 import io.github.ndev.roadsight.ui.Pill
 import io.github.ndev.roadsight.ui.PlateGraphic
-
-private val LIVE_RES = Size(1920, 1080)
 
 @Composable
 fun PlatesScreen() {
@@ -99,30 +111,58 @@ fun PlatesScreen() {
 
 @Composable
 private fun LiveScreen(app: App, ui: PlateUi, notice: String?, onPick: () -> Unit) {
-    var camera by remember { mutableStateOf<Camera?>(null) }
+    val host = app.camera
+    val camera by host.camera.collectAsState()
+    val zoomInfo by host.zoom.collectAsState()
+    val bg by host.background.collectAsState()
+    val bgMode by BackgroundService.mode.collectAsState()
+    val watching = bgMode == BackgroundService.PLATES
+    // The camera is counting traffic in the background: it can't read plates at the same time.
+    val busy = bg != null && bg?.sink !== app.plates
     var paused by rememberSaveable { mutableStateOf(false) }
     var torch by remember { mutableStateOf(false) }
-    var zoom by remember { mutableFloatStateOf(1f) }
+    var zoom by remember { mutableFloatStateOf(app.prefs.platesZoom.toFloat()) }
     var selected by remember { mutableStateOf<TrayItem?>(null) }
+    var menu by remember { mutableStateOf(false) }
+    val askNotifications = rememberNotificationRequest()
+    val use = remember { CameraUse(app.plates, CameraHost.PLATES_RES, "plates") }
 
-    DisposableEffect(paused) {
-        if (!paused) app.plates.start()
-        onDispose { app.plates.stop() }
+    DisposableEffect(paused, busy) {
+        if (!paused && !busy) app.plates.start()
+        // Watching in the background keeps reading plates when this screen goes.
+        onDispose { if (!app.plates.watching) app.plates.stop() }
     }
+    DisposableEffect(Unit) { onDispose { app.prefs.platesZoom = zoom.toDouble() } }
     val view = LocalView.current
     DisposableEffect(paused) {
         view.keepScreenOn = !paused
         onDispose { view.keepScreenOn = false }
     }
+    LaunchedEffect(camera) { torch = false }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        if (!paused) {
-            CameraPreview(Modifier.fillMaxSize(), app.plates, LIVE_RES) { cam ->
-                camera = cam
-                torch = false
-                zoom = 1f
+        if (busy) {
+            Column(Modifier.align(Alignment.Center).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("The camera is counting traffic", color = C.text, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(6.dp))
+                Text("It carries on in the background. Stop counting to read plates here.", color = C.muted, textAlign = TextAlign.Center)
+                Spacer(Modifier.height(16.dp))
+                OutlinedButton(onClick = { app.traffic.stopSession() }) { Text("Stop counting") }
             }
-            LiveOverlay(ui, Modifier.fillMaxSize())
+        } else if (!paused) {
+            Box(
+                Modifier.fillMaxSize().pointerInput(Unit) {
+                    // Pinch to zoom, from the ultra-wide lens (if the phone has one) to the longest zoom.
+                    detectTransformGestures { _, _, change, _ ->
+                        val z = host.zoom.value
+                        val next = zoom * change
+                        zoom = if (z != null) next.coerceIn(z.min, z.max) else next.coerceIn(0.5f, 10f)
+                    }
+                },
+            ) {
+                CameraPreview(Modifier.fillMaxSize(), use, zoom)
+                LiveOverlay(ui, Modifier.fillMaxSize())
+            }
         } else {
             Column(Modifier.align(Alignment.Center).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("Scanning paused", color = C.text, fontSize = 18.sp, fontWeight = FontWeight.Bold)
@@ -137,21 +177,49 @@ private fun LiveScreen(app: App, ui: PlateUi, notice: String?, onPick: () -> Uni
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val status = when {
+                busy -> "Counting traffic"
                 paused -> "Paused"
                 !ui.ready -> ui.status
-                else -> "%.0f fps · %.0f ms · %s%s".format(ui.fps, ui.msTotal, ui.tier, if (ui.idle) " · idle" else "")
+                else -> (if (watching) "Watching · " else "") + "%.0f fps · %.0f ms · %s%s".format(ui.fps, ui.msTotal, ui.tier, if (ui.idle) " · idle" else "")
             }
-            Pill(status, dot = if (ui.ready && !paused) C.mint else C.amber)
-            Spacer(Modifier.weight(1f))
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                Pill(status, dot = if (busy || !ui.ready || paused) C.amber else if (watching) C.sky else C.mint)
+            }
             val cam = camera
-            if (cam != null && cam.cameraInfo.hasFlashUnit()) {
+            if (!busy && !paused && cam != null && cam.cameraInfo.hasFlashUnit()) {
                 RoundButton(Ic.torch, on = torch) {
                     torch = !torch
                     cam.cameraControl.enableTorch(torch)
                 }
             }
             RoundButton(Ic.photo, onClick = onPick)
-            RoundButton(if (paused) Ic.play else Ic.pause) { paused = !paused }
+            if (!busy) {
+                RoundButton(if (paused) Ic.play else Ic.pause) {
+                    if (!paused && watching) app.plates.stopWatching()
+                    paused = !paused
+                }
+            }
+            Box {
+                RoundButton(Icons.Filled.MoreVert) { menu = true }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Keep watching with the screen off") },
+                        enabled = !busy && !paused,
+                        leadingIcon = { Checkbox(checked = watching, onCheckedChange = null) },
+                        onClick = {
+                            menu = false
+                            if (watching) {
+                                app.plates.stopWatching()
+                            } else {
+                                askNotifications()
+                                app.plates.startWatching()
+                            }
+                        },
+                    )
+                    HorizontalDivider(color = C.line2)
+                    OrientationItems(app) { menu = false }
+                }
+            }
         }
 
         // Bottom: zoom and the plates found
@@ -159,21 +227,11 @@ private fun LiveScreen(app: App, ui: PlateUi, notice: String?, onPick: () -> Uni
             notice?.let {
                 Text(it, color = C.amber, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp))
             }
-            val cam = camera
-            val maxZoom = cam?.cameraInfo?.zoomState?.value?.maxZoomRatio ?: 1f
-            if (!paused && maxZoom >= 2f) {
-                Row(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for (z in listOf(1f, 2f, 3f).filter { it <= maxZoom }) {
-                        val on = z == zoom
-                        Box(
-                            Modifier.clip(RoundedCornerShape(50)).background(if (on) C.text else Color(0x99000000))
-                                .clickable {
-                                    zoom = z
-                                    cam?.cameraControl?.setZoomRatio(z)
-                                }
-                                .padding(horizontal = 12.dp, vertical = 6.dp),
-                        ) { Text("${z.toInt()}×", color = if (on) C.bg else C.text, fontSize = 13.sp, fontWeight = FontWeight.Bold) }
-                    }
+            val steps = zoomSteps(zoomInfo)
+            if (!paused && !busy && steps.isNotEmpty()) {
+                ZoomChips(steps, zoom, Modifier.align(Alignment.CenterHorizontally).padding(bottom = 8.dp)) { z ->
+                    zoom = z
+                    app.prefs.platesZoom = z.toDouble()
                 }
             }
             Tray(ui.tray) { selected = it }
@@ -192,6 +250,36 @@ private fun LiveScreen(app: App, ui: PlateUi, notice: String?, onPick: () -> Uni
                 app.plates.removeFromTray(item.key)
                 app.io.execute { runCatching { app.db.deletePlate(item.key) } }
                 selected = null
+            },
+        )
+    }
+}
+
+/** Zoom buttons (the current one highlighted; a zoom between steps highlights none). */
+@Composable
+fun ZoomChips(steps: List<Float>, zoom: Float, modifier: Modifier = Modifier, onZoom: (Float) -> Unit) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        for (z in steps) {
+            val on = kotlin.math.abs(z - zoom) < 0.05f
+            Box(
+                Modifier.clip(RoundedCornerShape(50)).background(if (on) C.text else Color(0x99000000))
+                    .clickable { onZoom(z) }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+            ) { Text(zoomLabel(z), color = if (on) C.bg else C.text, fontSize = 13.sp, fontWeight = FontWeight.Bold) }
+        }
+    }
+}
+
+/** Menu items for which way round the app is: follow the phone, or stay portrait or landscape. */
+@Composable
+fun OrientationItems(app: App, onDone: () -> Unit) {
+    for ((value, label) in listOf("auto" to "Turn with the phone", "portrait" to "Keep portrait", "landscape" to "Keep landscape")) {
+        DropdownMenuItem(
+            text = { Text(label) },
+            leadingIcon = { RadioButton(selected = app.prefs.orientation == value, onClick = null) },
+            onClick = {
+                app.prefs.orientation = value
+                onDone()
             },
         )
     }

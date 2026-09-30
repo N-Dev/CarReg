@@ -1,6 +1,8 @@
 package io.github.ndev.roadsight
 
 import android.app.Application
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
 import android.net.Uri
 import android.os.Build
@@ -9,6 +11,7 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import androidx.compose.runtime.mutableIntStateOf
 import io.github.ndev.roadsight.ai.Engine
+import io.github.ndev.roadsight.camera.CameraHost
 import io.github.ndev.roadsight.core.Json
 import io.github.ndev.roadsight.core.traffic.Lines
 import io.github.ndev.roadsight.data.Db
@@ -28,6 +31,10 @@ class App : Application() {
     lateinit var db: Db
         private set
     lateinit var engine: Engine
+        private set
+
+    /** The back camera, shared by the screens and the background service. */
+    lateinit var camera: CameraHost
         private set
     val plates: PlateScanner by lazy { PlateScanner(this) }
     val traffic: TrafficCounter by lazy { TrafficCounter(this) }
@@ -54,6 +61,8 @@ class App : Application() {
         prefs = Prefs(this)
         db = Db(this)
         engine = Engine(this)
+        camera = CameraHost(this)
+        channels()
         io.execute {
             // History deletes itself after the chosen period.
             runCatching { db.prunePlates(prefs.retentionDays()) }
@@ -75,7 +84,26 @@ class App : Application() {
         }
     }
 
+    private fun channels() {
+        val nm = getSystemService(NotificationManager::class.java) ?: return
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_BACKGROUND, "Counting and watching", NotificationManager.IMPORTANCE_LOW).apply {
+                description = "Shown while RoadSight counts traffic or watches for plates with the screen off"
+                setShowBadge(false)
+            },
+        )
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_WATCH, "Watched plates", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "When a plate on your watchlist is seen"
+                enableVibration(true)
+            },
+        )
+    }
+
     companion object {
+        const val CHANNEL_BACKGROUND = "background"
+        const val CHANNEL_WATCH = "watch"
+
         lateinit var instance: App
             private set
     }
@@ -163,6 +191,16 @@ class Prefs(context: Context) {
 
     fun retentionDays(): Int? = retention.toIntOrNull()
 
+    /** Plates screen zoom (below 1 is the ultra-wide lens). */
+    var platesZoom by dbl("p_zoom", 1.0)
+
+    // ---------------------------------------------------------------- display
+    /** auto | portrait | landscape: which way round the app is (the Traffic tab follows its set-up). */
+    var orientation by str("orientation", "auto")
+
+    /** Debug mode: overlays, timings and the log. */
+    var debug by bool("debug", false)
+
     // ---------------------------------------------------------------- traffic
     /** auto | tiny | nano */
     var trafficModel by str("t_model", "auto")
@@ -179,6 +217,18 @@ class Prefs(context: Context) {
     var dir2 by str("t_dir2", "Right to left")
     var site by str("t_site", "")
     var setupDone by bool("t_setup", false)
+
+    /** portrait | landscape: which way round the lines were set up ("" before the first set-up). */
+    var trafficOrientation by str("t_orient", "")
+
+    /** The zoom the lines were set up at. */
+    var trafficZoom by dbl("t_zoom", 1.0)
+
+    /** The road runs away from the camera (level lines) rather than across the picture. */
+    var roadAway by bool("t_away", false)
+
+    /** Keep counting with the screen off or another app open (a notification shows meanwhile). */
+    var backgroundCounting by bool("t_background", true)
     private var linesJson by str("t_lines", "")
 
     var lines: Lines

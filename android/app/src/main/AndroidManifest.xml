@@ -4,6 +4,12 @@
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Counting and plate watching with the screen off: a foreground service that uses the camera. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- The notification while running in the background, and watchlist alerts. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".App"
@@ -31,6 +37,11 @@
                 <data android:mimeType="image/*" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".service.BackgroundService"
+            android:exported="false"
+            android:foregroundServiceType="camera" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

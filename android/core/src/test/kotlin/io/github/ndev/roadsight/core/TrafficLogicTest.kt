@@ -7,6 +7,7 @@ import io.github.ndev.roadsight.core.traffic.Lines
 import io.github.ndev.roadsight.core.traffic.Stats
 import io.github.ndev.roadsight.core.traffic.TrafficRecord
 import io.github.ndev.roadsight.core.traffic.crossing
+import io.github.ndev.roadsight.core.traffic.directionNames
 import io.github.ndev.roadsight.core.traffic.dropRiders
 import io.github.ndev.roadsight.core.traffic.gapAlong
 import io.github.ndev.roadsight.core.traffic.regionFor
@@ -173,6 +174,41 @@ class TrafficLogicTest {
         assertTrue(nearGap > farGap * 1.5, "$nearGap vs $farGap")
         val (x, y, w, h) = regionFor(Lines.default(), aspect).toList()
         assertTrue(x < 0.25 && x + w > 0.75 && y < 0.3 && y + h >= 0.95)
+    }
+
+    /** A road running away from the camera: level lines, traffic moving up and down the picture. */
+    @Test
+    fun aRoadRunningAwayIsCountedWithLevelLines() {
+        val away = Lines.away()
+        val tall = 16.0 / 9 // a portrait frame
+        assertTrue(away.level(tall) && away.level(aspect) && !Lines.default().level(aspect))
+        assertEquals("Towards me" to "Away from me", directionNames(away, tall))
+        assertEquals("Left to right" to "Right to left", directionNames(Lines.default(), aspect))
+        val (x, y, w, h) = regionFor(away, tall).toList()
+        assertTrue(y < 0.3 && y + h > 0.9 && x < 0.13 && x + w > 0.87, "region ${listOf(x, y, w, h)}")
+        // A car coming towards the camera (down the picture) taking 1.5 s from line A to line B, 20 m
+        // apart, is doing 48 km/h; one going away the same way round is direction 2.
+        val c = Counter(away, 20.0, tall, roi = regionFor(away, tall))
+        val out = ArrayList<TrafficRecord>()
+        var t = 0.0
+        while (t < 9000) {
+            val dets = ArrayList<Det>()
+            val footDown = 0.2 + 0.3 / 1500 * t // 0.45 at 1250 ms, 0.75 at 2750 ms
+            if (footDown < 1.0) dets.add(Det("car", 0.8, doubleArrayOf(0.4, footDown - 0.1, 0.6, footDown)))
+            val footUp = 1.0 - 0.3 / 2000 * (t - 3000) // 0.75 at 4667 ms, 0.45 at 6667 ms
+            if (t >= 3000 && footUp > 0.25) dets.add(Det("car", 0.8, doubleArrayOf(0.45, footUp - 0.08, 0.6, footUp)))
+            out.addAll(c.update(dets, t).done)
+            t += 100
+        }
+        out.addAll(c.flush())
+        val towards = out.firstOrNull { it.dir == 1 }
+        val awayRec = out.firstOrNull { it.dir == 2 }
+        assertNotNull(towards, out.toString())
+        assertNotNull(awayRec, out.toString())
+        assertTrue(near(towards.speed, 48.0, 2.0), "towards ${towards.speed}")
+        assertTrue(near(awayRec.speed, 36.0, 2.0), "away ${awayRec.speed}")
+        assertNull(towards.length, "no lengths when the road runs away")
+        assertEquals(2, out.size, out.toString())
     }
 
     @Test

@@ -12,6 +12,8 @@ import io.github.ndev.roadsight.core.traffic.Kinds
 import io.github.ndev.roadsight.core.traffic.Lines
 import io.github.ndev.roadsight.core.traffic.VehicleDetector
 import io.github.ndev.roadsight.core.traffic.regionFor
+import io.github.ndev.roadsight.debug.DebugLog
+import io.github.ndev.roadsight.service.BackgroundService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.math.abs
 import kotlin.math.hypot
@@ -41,6 +43,8 @@ data class TrafficUi(
     val totals: Map<String, IntArray> = emptyTotals(),
     val last: LastCounted? = null,
     val counted: Long = 0,
+    /** Frames analysed since the app started. */
+    val frames: Long = 0,
 )
 
 fun emptyTotals(): Map<String, IntArray> = Kinds.ORDER.associateWith { IntArray(3) }
@@ -105,7 +109,10 @@ class TrafficCounter(private val app: App) : FrameSink {
             sessionId = app.db.newSession(p.site, started, p.distanceM, p.speedLimit, p.dir1, p.dir2, p.lines, model.key)
             running = true
             ui.value = ui.value.copy(running = true, started = started, sessionId = sessionId, totals = copyTotals(), last = null)
+            DebugLog.add("traffic", "Counting started (session $sessionId, ${p.distanceM} m, lines ${if (p.lines.level(if (aspect > 0) aspect else 9.0 / 16)) "level" else "upright"})")
         }
+        // Counting carries on with the screen off (Android shows a notification meanwhile).
+        if (app.prefs.backgroundCounting) BackgroundService.start(app, BackgroundService.TRAFFIC)
     }
 
     /** Ends the session: everything still in view is saved. Returns the session's id. */
@@ -118,6 +125,8 @@ class TrafficCounter(private val app: App) : FrameSink {
             id?.let { app.db.endSession(it, System.currentTimeMillis()) }
             sessionId = null
             ui.value = ui.value.copy(running = false, sessionId = null)
+            DebugLog.add("traffic", "Counting stopped (session $id)")
+            if (BackgroundService.mode.value == BackgroundService.TRAFFIC) BackgroundService.stop(app)
             return id
         }
     }
@@ -208,6 +217,7 @@ class TrafficCounter(private val app: App) : FrameSink {
             totals = liveTotals(c),
             last = last,
             counted = if (out.counted.isNotEmpty()) now else ui.value.counted,
+            frames = ui.value.frames + 1,
         )
     }
 

@@ -3,7 +3,6 @@ package io.github.ndev.roadsight.traffic
 import android.app.Activity
 import android.content.res.Configuration
 import android.os.BatteryManager
-import android.util.Size
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
@@ -34,8 +33,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -50,6 +54,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -80,7 +85,17 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.ndev.roadsight.App
+import io.github.ndev.roadsight.camera.CameraHost
 import io.github.ndev.roadsight.camera.CameraPreview
+import io.github.ndev.roadsight.camera.CameraUse
+import io.github.ndev.roadsight.camera.zoomLabel
+import io.github.ndev.roadsight.camera.zoomSteps
+import io.github.ndev.roadsight.core.traffic.directionNames
+import io.github.ndev.roadsight.plates.RoundButton
+import io.github.ndev.roadsight.plates.ZoomChips
+import io.github.ndev.roadsight.service.BackgroundService
+import io.github.ndev.roadsight.ui.Segmented
+import io.github.ndev.roadsight.ui.rememberNotificationRequest
 import io.github.ndev.roadsight.core.traffic.Kinds
 import io.github.ndev.roadsight.core.traffic.Lines
 import io.github.ndev.roadsight.core.traffic.regionFor
@@ -93,9 +108,6 @@ import kotlin.math.floor
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
-
-/** Traffic needs less detail than plates: the area around the lines is shrunk to 416 pixels anyway. */
-private val TRAFFIC_RES = Size(1280, 720)
 
 private val LIMITS = listOf(30, 50, 60, 80, 100, 120)
 private val TNUM = TextStyle(fontFeatureSettings = "tnum")
@@ -112,12 +124,8 @@ fun videoRect(w: Float, h: Float, aspect: Double): VideoRect {
 /** A line end (end 0 or 1), or a whole line (end -1), being dragged. */
 private class Grab(val line: Char, val end: Int, val from: Offset)
 
-/** Default direction names from where the lines are: A left of B means A → B is left to right. */
-fun suggestNames(lines: Lines): Pair<String, String> {
-    val ax = (lines.a[0] + lines.a[2]) / 2
-    val bx = (lines.b[0] + lines.b[2]) / 2
-    return if (ax <= bx) "Left to right" to "Right to left" else "Right to left" to "Left to right"
-}
+/** The lines to start from: across the picture, or for a road running away from the camera. */
+fun presetLines(away: Boolean): Lines = if (away) Lines.away() else Lines.default()
 
 @Composable
 fun TrafficScreen() {
@@ -140,6 +148,17 @@ fun TrafficScreen() {
     var dir1 by rememberSaveable { mutableStateOf("") }
     var dir2 by rememberSaveable { mutableStateOf("") }
     var site by rememberSaveable { mutableStateOf("") }
+    var draftZoom by rememberSaveable { mutableFloatStateOf(prefs.trafficZoom.toFloat()) }
+    var draftAway by rememberSaveable { mutableStateOf(prefs.roadAway) }
+    var menu by remember { mutableStateOf(false) }
+    val host = app.camera
+    val zoomInfo by host.zoom.collectAsState()
+    val bg by host.background.collectAsState()
+    // The camera is watching for plates in the background: it can't count traffic at the same time.
+    val busy = bg != null && bg?.sink !== app.traffic
+    val use = remember { CameraUse(app.traffic, CameraHost.TRAFFIC_RES, "traffic") }
+    val askNotifications = rememberNotificationRequest()
+    val here = if (landscape) "landscape" else "portrait"
 
     // Until the first frame arrives, assume the picture is the shape of the screen.
     val aspect = if (ui.ready) ui.aspect else if (landscape) 9.0 / 16 else 16.0 / 9
@@ -147,14 +166,21 @@ fun TrafficScreen() {
     val lines = if (editing) draft else saved
     val roi = if (editing) regionFor(draft, aspect) else ui.roi
 
-    fun openEditor() {
+    fun openEditor(fresh: Boolean = false) {
         if (ui.running) return
-        draft = prefs.lines.copy()
+        draftAway = prefs.roadAway
+        draft = if (fresh) presetLines(draftAway) else prefs.lines.copy()
+        draftZoom = prefs.trafficZoom.toFloat()
         distanceText = fmtDistance(prefs.distanceM)
         limit = prefs.speedLimit
         dir1 = prefs.dir1
         dir2 = prefs.dir2
         site = prefs.site
+        if (fresh) {
+            val n = directionNames(draft, aspect)
+            dir1 = n.first
+            dir2 = n.second
+        }
         editing = true
     }
 
@@ -165,6 +191,10 @@ fun TrafficScreen() {
         prefs.dir1 = dir1.trim().ifEmpty { "A to B" }
         prefs.dir2 = dir2.trim().ifEmpty { "B to A" }
         prefs.site = site.trim()
+        prefs.trafficZoom = draftZoom.toDouble()
+        prefs.roadAway = draftAway
+        // The lines fit the picture this way round (and at this zoom): the Traffic tab keeps to both.
+        prefs.trafficOrientation = here
         prefs.setupDone = true
         app.traffic.reconfigure()
         editing = false
@@ -181,12 +211,13 @@ fun TrafficScreen() {
         onDispose { view.keepScreenOn = false }
     }
 
-    // The camera stops while the app is in the background (or the screen is off), and so does counting.
+    // Without background counting, the camera stops while the app is in the background (or the screen
+    // is off), and so does counting.
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
         var stoppedAt = 0L
         val obs = LifecycleEventObserver { _, e ->
-            if (e == Lifecycle.Event.ON_STOP && app.traffic.ui.value.running) stoppedAt = System.currentTimeMillis()
+            if (e == Lifecycle.Event.ON_STOP && app.traffic.ui.value.running && BackgroundService.mode.value != BackgroundService.TRAFFIC) stoppedAt = System.currentTimeMillis()
             if (e == Lifecycle.Event.ON_START && stoppedAt > 0) {
                 val gap = (System.currentTimeMillis() - stoppedAt) / 1000
                 stoppedAt = 0
@@ -259,6 +290,9 @@ fun TrafficScreen() {
             }
         } else {
             if (editing) saveEditor()
+            // Counting keeps to the way round it started, so a knock doesn't move the lines.
+            if (prefs.trafficOrientation.isEmpty()) prefs.trafficOrientation = here
+            if (prefs.backgroundCounting) askNotifications()
             app.traffic.startSession()
             lastTouch[0] = System.currentTimeMillis()
             warnedBattery = false
@@ -278,8 +312,18 @@ fun TrafficScreen() {
     ) {
         val stage: @Composable (Modifier) -> Unit = { m ->
             Box(m.background(Color.Black)) {
-                CameraPreview(Modifier.fillMaxSize(), app.traffic, TRAFFIC_RES)
-                TrafficOverlay(
+                if (busy) {
+                    Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("The camera is watching for plates", color = C.text, fontSize = 17.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                        Spacer(Modifier.height(6.dp))
+                        Text("It carries on in the background. Stop watching to count traffic here.", color = C.muted, textAlign = TextAlign.Center)
+                        Spacer(Modifier.height(14.dp))
+                        OutlinedButton(onClick = { app.plates.stopWatching() }) { Text("Stop watching") }
+                    }
+                } else {
+                    CameraPreview(Modifier.fillMaxSize(), use, if (editing) draftZoom else prefs.trafficZoom.toFloat())
+                }
+                if (!busy) TrafficOverlay(
                     ui = ui, lines = lines, distanceM = if (editing) distanceText.replace(',', '.').toDoubleOrNull() ?: prefs.distanceM else prefs.distanceM,
                     editing = editing, aspect = aspect, roi = roi,
                     modifier = Modifier.fillMaxSize().pointerInput(editing, aspect) {
@@ -299,19 +343,47 @@ fun TrafficScreen() {
                 )
                 Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     val status = when {
+                        busy -> "Watching for plates"
                         !ui.ready -> ui.status
                         else -> "${if (ui.running) "Counting" else "Watching"} · ${fps(ui.fps)} fps${if (ui.idle) " · idle" else ""}"
                     }
-                    Pill(
-                        status, dot = if (!ui.ready) C.amber else if (ui.running) C.red else C.mint,
-                        modifier = Modifier.clickable {
-                            scope.launch {
-                                snack.showSnackbar(
-                                    if (ui.ready) "${ui.model} model · AI ${ui.msAi.toInt()} ms a frame · picture ${ui.msPrep.toInt()} ms" else ui.status,
-                                )
-                            }
-                        },
-                    )
+                    Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                        Pill(
+                            status, dot = if (busy || !ui.ready) C.amber else if (ui.running) C.red else C.mint,
+                            modifier = Modifier.clickable {
+                                scope.launch {
+                                    snack.showSnackbar(
+                                        if (ui.ready) "${ui.model} model · AI ${ui.msAi.toInt()} ms a frame · picture ${ui.msPrep.toInt()} ms" else ui.status,
+                                    )
+                                }
+                            },
+                        )
+                    }
+                    Box {
+                        RoundButton(Icons.Filled.MoreVert) { menu = true }
+                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            val other = if (landscape) "portrait" else "landscape"
+                            DropdownMenuItem(
+                                text = { Text("Set up for $other") },
+                                enabled = !ui.running && !busy,
+                                onClick = {
+                                    menu = false
+                                    // The lines only fit the picture one way round: turn it and set them again.
+                                    prefs.trafficOrientation = other
+                                    openEditor(fresh = true)
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Keep counting with the screen off") },
+                                leadingIcon = { Checkbox(checked = prefs.backgroundCounting, onCheckedChange = null) },
+                                enabled = !ui.running,
+                                onClick = {
+                                    menu = false
+                                    prefs.backgroundCounting = !prefs.backgroundCounting
+                                },
+                            )
+                        }
+                    }
                 }
                 if (editing) {
                     Text(
@@ -332,6 +404,15 @@ fun TrafficScreen() {
                 Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
                     if (editing) {
                         SetupForm(
+                            away = draftAway,
+                            onAway = { a ->
+                                draftAway = a
+                                draft = presetLines(a)
+                                val n = directionNames(draft, aspect)
+                                dir1 = n.first
+                                dir2 = n.second
+                            },
+                            zoomSteps = zoomSteps(zoomInfo), zoom = draftZoom, onZoom = { draftZoom = it },
                             distanceText = distanceText, onDistance = { distanceText = it },
                             limit = limit, onLimit = { limit = it },
                             dir1 = dir1, onDir1 = { dir1 = it }, dir2 = dir2, onDir2 = { dir2 = it },
@@ -346,8 +427,8 @@ fun TrafficScreen() {
                     if (editing) {
                         OutlinedButton(
                             onClick = {
-                                draft = Lines.default()
-                                val n = suggestNames(draft)
+                                draft = presetLines(draftAway)
+                                val n = directionNames(draft, aspect)
                                 dir1 = n.first
                                 dir2 = n.second
                             },
@@ -357,10 +438,10 @@ fun TrafficScreen() {
                             Text("Done", fontWeight = FontWeight.Bold)
                         }
                     } else {
-                        OutlinedButton(onClick = { openEditor() }, enabled = !ui.running, modifier = Modifier.weight(1f)) { Text("Set up") }
+                        OutlinedButton(onClick = { openEditor() }, enabled = !ui.running && !busy, modifier = Modifier.weight(1f)) { Text("Set up") }
                         Button(
                             onClick = { startStop() },
-                            enabled = ui.ready || ui.running,
+                            enabled = (ui.ready && !busy) || ui.running,
                             modifier = Modifier.weight(1.4f),
                             colors = ButtonDefaults.buttonColors(containerColor = if (ui.running) C.red else C.mint, contentColor = C.bg),
                         ) { Text(if (ui.running) "Stop" else "Start counting", fontWeight = FontWeight.Bold) }
@@ -436,6 +517,12 @@ private fun ColumnScope.CountsPanel(ui: TrafficUi, now: Long) {
         }
     }
     Text("A→B: ${prefs.dir1} · B→A: ${prefs.dir2}", color = C.muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp))
+    if (prefs.trafficOrientation.isNotEmpty()) {
+        Text(
+            "Lines set up in ${prefs.trafficOrientation} at ${zoomLabel(prefs.trafficZoom.toFloat())}",
+            color = C.muted, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp),
+        )
+    }
 }
 
 @Composable
@@ -452,6 +539,11 @@ private fun CountRow(label: String, a: String, b: String, total: String, header:
 
 @Composable
 private fun ColumnScope.SetupForm(
+    away: Boolean,
+    onAway: (Boolean) -> Unit,
+    zoomSteps: List<Float>,
+    zoom: Float,
+    onZoom: (Float) -> Unit,
     distanceText: String,
     onDistance: (String) -> Unit,
     limit: Int,
@@ -469,6 +561,18 @@ private fun ColumnScope.SetupForm(
             "like lamp posts, gateposts or road markings, 10–30 m apart.",
         color = C.muted, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp, bottom = 10.dp),
     )
+    Label("The road runs")
+    Segmented(listOf("across" to "Across the picture", "away" to "Away from me"), if (away) "away" else "across") { onAway(it == "away") }
+    Spacer(Modifier.height(12.dp))
+    if (zoomSteps.isNotEmpty()) {
+        Label("Zoom")
+        ZoomChips(zoomSteps, zoom) { onZoom(it) }
+        Text(
+            "Zoom out to see more road. The lines are set on this view, so counting keeps this zoom.",
+            color = C.muted, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp),
+        )
+        Spacer(Modifier.height(12.dp))
+    }
     Label("Distance between the lines")
     Row(verticalAlignment = Alignment.CenterVertically) {
         fun step(d: Double) {
@@ -632,8 +736,14 @@ private fun TrafficOverlay(ui: TrafficUi, lines: Lines, distanceM: Double, editi
             val p1 = Offset(x(l[2]), y(l[3]))
             drawLine(Color(0x8C000000), p0, p1, 6.dp.toPx(), StrokeCap.Round)
             drawLine(Color.White, p0, p1, 2.5.dp.toPx(), StrokeCap.Round)
-            val top = if (l[1] < l[3]) p0 else p1
-            val c = Offset(top.x, top.y - 16.dp.toPx())
+            val c = if (lines.level(aspect)) {
+                // Level lines (a road running away): the letter goes at the left end.
+                val left = if (p0.x <= p1.x) p0 else p1
+                Offset(max(left.x - 18.dp.toPx(), 12.dp.toPx()), left.y)
+            } else {
+                val top = if (l[1] < l[3]) p0 else p1
+                Offset(top.x, top.y - 16.dp.toPx())
+            }
             drawCircle(Color.White, 11.dp.toPx(), c)
             paint.color = C.bg.toArgb()
             paint.textSize = 13.sp.toPx()

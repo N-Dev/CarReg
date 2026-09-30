@@ -1,6 +1,10 @@
 package io.github.ndev.roadsight
 
 import android.Manifest
+import android.accessibilityservice.AccessibilityService
+import android.app.NotificationManager
+import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -13,12 +17,14 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import io.github.ndev.roadsight.core.traffic.Lines
 import io.github.ndev.roadsight.core.traffic.Report
 import io.github.ndev.roadsight.core.traffic.ReportSession
 import io.github.ndev.roadsight.core.traffic.Stats
 import io.github.ndev.roadsight.data.Share
+import io.github.ndev.roadsight.service.BackgroundService
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -34,7 +40,7 @@ class ScreensTest {
     private val compose = createAndroidComposeRule<MainActivity>()
 
     @get:Rule
-    val rules: RuleChain = RuleChain.outerRule(GrantPermissionRule.grant(Manifest.permission.CAMERA)).around(compose)
+    val rules: RuleChain = RuleChain.outerRule(GrantPermissionRule.grant(Manifest.permission.CAMERA, Manifest.permission.POST_NOTIFICATIONS)).around(compose)
 
     private val app: App get() = App.instance
 
@@ -104,6 +110,92 @@ class ScreensTest {
         }
     }
 
+    /** Counting carries on with the app in the background (or the screen off), with a notification. */
+    @Test
+    fun countingCarriesOnInTheBackground() {
+        val p = app.prefs
+        val bg = p.backgroundCounting
+        p.backgroundCounting = true
+        try {
+            compose.onNodeWithTag("tab-traffic").performClick()
+            waitForText("Start counting")
+            compose.waitUntil(60_000) { app.traffic.ui.value.ready }
+            compose.onNodeWithText("Start counting").performClick()
+            waitForText("Stop")
+            compose.waitUntil(10_000) { BackgroundService.mode.value == BackgroundService.TRAFFIC }
+            val nm = app.getSystemService(NotificationManager::class.java)
+            compose.waitUntil(10_000) { nm.activeNotifications.any { it.id == 7 } }
+            // Leave the app: the camera and the counting go on.
+            InstrumentationRegistry.getInstrumentation().uiAutomation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
+            Thread.sleep(3000)
+            val before = app.traffic.ui.value.frames
+            Thread.sleep(6000)
+            val after = app.traffic.ui.value.frames
+            Shots.log("background: ${after - before} frames analysed in 6 s with the app in the background")
+            assertTrue("frames analysed in the background ($before to $after)", after > before)
+            // Back to the app, and stop.
+            app.startActivity(
+                Intent(app, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
+            )
+            waitForText("Stop")
+            settle()
+            compose.onNodeWithText("Stop").performClick()
+            waitForText("See results")
+            compose.waitUntil(10_000) { BackgroundService.mode.value == null }
+        } finally {
+            if (app.traffic.ui.value.running) app.traffic.stopSession()
+            p.backgroundCounting = bg
+        }
+    }
+
+    /** Zoom buttons, landscape, and lines for a road running away from the camera. */
+    @Test
+    fun zoomLandscapeAndARoadRunningAway() {
+        val p = app.prefs
+        val orient = p.orientation
+        val tOrient = p.trafficOrientation
+        try {
+            compose.waitUntil(30_000) { app.camera.zoom.value != null }
+            val z = app.camera.zoom.value!!
+            Shots.log("camera zoom: ${z.min}x to ${z.max}x")
+            if (z.max >= 2f) {
+                compose.onNodeWithText("2×").performClick()
+                compose.waitUntil(10_000) { abs((app.camera.zoom.value?.ratio ?: 0f) - 2f) < 0.1f }
+                settle()
+                Shots.take("15-zoom-2x")
+                compose.onNodeWithText("1×").performClick()
+            }
+            p.orientation = "landscape"
+            compose.waitUntil(15_000) { compose.activity.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE }
+            settle(4000)
+            Shots.take("16-plates-landscape")
+            p.trafficOrientation = "landscape"
+            compose.onNodeWithTag("tab-traffic").performClick()
+            waitForText("Start counting")
+            settle(4000)
+            Shots.take("17-traffic-landscape")
+            compose.onNodeWithText("Set up").performClick()
+            waitForText("Away from me")
+            compose.onNodeWithText("Away from me").performClick()
+            waitForText("Towards me")
+            settle()
+            Shots.take("18-road-away")
+            compose.onNodeWithText("Done").performClick()
+            waitForText("Start counting")
+            settle(2000)
+            Shots.take("19-road-away-lines")
+            assertTrue("level lines saved", p.roadAway && p.lines.level(9.0 / 16))
+            assertTrue("directions", p.dir1 == "Towards me" && p.dir2 == "Away from me")
+        } finally {
+            p.orientation = orient
+            p.trafficOrientation = tOrient
+            p.roadAway = false
+            p.lines = Lines.default()
+            p.dir1 = "Left to right"
+            p.dir2 = "Right to left"
+        }
+    }
+
     @Test
     fun photoSharedToTheApp() {
         val ctx = app.applicationContext
@@ -132,6 +224,9 @@ class ScreensTest {
         p.dir1 = "Left to right"
         p.dir2 = "Right to left"
         p.trafficModel = "nano"
+        // Only the synthetic frames: the camera mustn't feed the counter too.
+        val bg = p.backgroundCounting
+        p.backgroundCounting = false
         val tc = app.traffic
         tc.reconfigure()
         tc.startSession()
@@ -157,6 +252,7 @@ class ScreensTest {
             tc.onFrame(frame, 1000 + t * 1000)
         }
         val id = tc.stopSession()
+        p.backgroundCounting = bg
         assertNotNull(id)
         Thread.sleep(800) // saved on the background thread
         val events = app.db.events(id!!)

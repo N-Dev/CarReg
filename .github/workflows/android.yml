@@ -6,7 +6,8 @@ name: Android app
 
 on:
   push:
-    branches: [main]
+    # main builds, tests and releases; next only builds and tests (work in progress).
+    branches: [main, next]
     paths:
       - 'android/**'
       - 'models/**'

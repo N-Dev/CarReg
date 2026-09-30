@@ -3,6 +3,7 @@ package io.github.ndev.roadsight
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -108,6 +109,19 @@ fun RoadSightApp() {
     LaunchedEffect(openSession) { if (openSession != null) tab = Tab.HISTORY }
     // While counting, the traffic screen has the whole screen (and the tabs can't stop it by accident).
     val fullScreen = tab == Tab.TRAFFIC && counting.running
+
+    // Which way round: as chosen (turn with the phone, portrait or landscape); the Traffic tab keeps to
+    // the way round its lines were set up, as they only fit the picture that way.
+    val activity = LocalContext.current as? Activity
+    val prefs = app.prefs
+    val wanted = if (tab == Tab.TRAFFIC && prefs.trafficOrientation.isNotEmpty()) prefs.trafficOrientation else prefs.orientation
+    LaunchedEffect(wanted) {
+        activity?.requestedOrientation = when (wanted) {
+            "portrait" -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            "landscape" -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+    }
 
     Scaffold(
         containerColor = C.bg,
