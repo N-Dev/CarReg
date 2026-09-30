@@ -62,7 +62,12 @@ class OrtNet(private val env: OrtEnvironment, val session: OrtSession) : Net {
     }
 
     private fun toFloats(v: OnnxTensor): FloatArray {
-        v.floatBuffer?.let { fb -> return FloatArray(fb.remaining()).also { fb.get(it) } }
+        v.floatBuffer?.let { fb ->
+            // ONNX Runtime hands back a fresh copy: use its array as it is rather than copying it again
+            // (the traffic finder's output is over a megabyte a frame).
+            if (fb.hasArray() && fb.arrayOffset() == 0 && fb.position() == 0 && fb.remaining() == fb.array().size) return fb.array()
+            return FloatArray(fb.remaining()).also { fb.get(it) }
+        }
         v.longBuffer?.let { lb -> return FloatArray(lb.remaining()) { lb.get().toFloat() } }
         v.intBuffer?.let { ib -> return FloatArray(ib.remaining()) { ib.get().toFloat() } }
         v.doubleBuffer?.let { db -> return FloatArray(db.remaining()) { db.get().toFloat() } }

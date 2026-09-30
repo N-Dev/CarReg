@@ -39,6 +39,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -386,7 +387,9 @@ fun TrafficScreen() {
             lastTouch[0] = System.currentTimeMillis()
             dimmed = false
         }
-        SnackbarHost(snack, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 48.dp))
+        SnackbarHost(snack, Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 48.dp)) { data ->
+            Snackbar(data, containerColor = C.surface2, contentColor = C.text, actionColor = C.mint)
+        }
     }
 }
 
@@ -536,7 +539,10 @@ private fun DimScreen(ui: TrafficUi, now: Long, battery: Pair<Int, Boolean>?, on
         )
         Spacer(Modifier.height(28.dp))
         val b = battery?.let { " · battery ${it.first}%${if (it.second) ", charging" else ""}" } ?: ""
-        Text("Counting ${clock(now - ui.started)}$b · tap to wake", color = Color(0xFF30363C), fontSize = 12.5.sp)
+        Text(
+            "Counting ${clock(now - ui.started)}$b · tap to wake", color = Color(0xFF30363C), fontSize = 12.5.sp,
+            textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 24.dp),
+        )
     }
 }
 

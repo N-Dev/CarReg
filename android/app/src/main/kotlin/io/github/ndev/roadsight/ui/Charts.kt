@@ -168,6 +168,9 @@ fun HourChart(perHour: List<HourBin>, dirNames: List<String>, modifier: Modifier
                 if (i % every == 0) label(pad2(hourOf(b.start)), x + bw / 2, top + ph + 17.dp.toPx())
             }
         }
+        if (perHour.none { it.motor > 0 }) {
+            Text("No motor vehicles counted yet", color = C.muted, fontSize = 13.sp, modifier = Modifier.align(Alignment.Center))
+        }
         sel?.let { i ->
             val b = perHour[i]
             val h = hourOf(b.start)
