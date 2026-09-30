@@ -484,6 +484,42 @@ class ScreensTest {
         }
     }
 
+    /** Two days of counts at one site, put into one report from History. */
+    @Test
+    fun oneReportForSeveralDays() {
+        val db = app.db
+        val day = 86_400_000L
+        // Only these two sessions (other tests leave theirs behind).
+        db.clearSessions()
+        val t0 = java.time.LocalDate.now().minusDays(3).atTime(8, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val ids = (0..1).map { d ->
+            val start = t0 + d * day
+            val id = db.newSession("Days road", start, 20.0, 50, "Towards the village", "Towards the town", Lines.default(), "vehTiny")
+            db.addEvents(id, List(40) { i -> Event(start + i * 60_000L, if (i % 5 == 0) "bicycle" else "car", 1 + i % 2, 35.0 + i % 25, null) })
+            db.endSession(id, start + 2 * 3_600_000L)
+            id
+        }
+        app.dataChanged()
+        try {
+            compose.onNodeWithTag("tab-history").performClick()
+            waitForText("Traffic counts")
+            compose.onNodeWithText("Traffic counts").performClick()
+            waitForText("One report for several sessions…")
+            compose.onNodeWithText("One report for several sessions…").performClick()
+            waitForText("2 sessions chosen")
+            settle()
+            Shots.take("32-several-sessions")
+            compose.onNodeWithText("Report (PDF)").performClick()
+            waitForText("Report across the sessions")
+            settle()
+            Shots.take("33-several-sessions-report")
+            compose.onNodeWithText("Close").performClick()
+        } finally {
+            for (id in ids) db.deleteSession(id)
+            app.dataChanged()
+        }
+    }
+
     /** At first launch the speed test is offered once. */
     @Test
     fun speedTestOfferedOnce() {
