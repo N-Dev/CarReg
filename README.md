@@ -153,7 +153,7 @@ count/models/                   YOLOX tiny and nano (COCO), from github.com/Megv
 
 **Install on the phone:** open <https://github.com/N-Dev/CarReg/releases/latest/download/RoadSight.apk> on it, allow your browser to install unknown apps when asked (once), and tap Install.
 
-RoadSight has PlateSight's live scanning, photo reading and history, and TrafficSight's counting, results and council report, in one app with four tabs (Plates, Traffic, History, Settings). It runs the same AI models natively with ONNX Runtime for Android rather than in Chrome, and a speed test in Settings picks the fastest way to run each model on your phone (CPU, XNNPACK or NNAPI). It doesn't have video mode or the developer tools yet. The code, tests and build are described in [android/README.md](android/README.md).
+RoadSight has PlateSight's live scanning, photo and video reading and history, and TrafficSight's counting, results and council report, in one app with four tabs (Plates, Traffic, History, Settings). It runs the same AI models natively with ONNX Runtime for Android rather than in Chrome, and a speed test (offered at first launch) picks the fastest way to run each model on your phone (CPU, XNNPACK or NNAPI). On top of the web apps it has a **watchlist** (a notification when a plate you're watching for is seen) and an ignore list for your own cars, counting and plate watching **with the screen off**, counting the traffic **in a video**, **reports across several days**, zoom (including the ultra-wide lens), portrait or landscape, lines for a road running away from you, **backup and restore**, a **debug mode**, and an update check. The code, tests and build are described in [android/README.md](android/README.md).
 
 ## Privacy
 
