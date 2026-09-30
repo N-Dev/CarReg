@@ -139,6 +139,10 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout --orphan publish
           rm -rf tests android   # test photos and scripts, and the Android app's source, aren’t part of the site
+          # The site keeps gh-pages' own copy of .github: this workflow's token isn't allowed to push
+          # changes to workflow files, and the site doesn't need them.
+          rm -rf .github
+          if git fetch -q --depth 1 origin gh-pages; then git checkout FETCH_HEAD -- .github 2>/dev/null || true; fi
           git add -A
           git commit -q -m "Publish ${GITHUB_SHA::7} with ONNX Runtime Web"
           git push -f origin publish:gh-pages
