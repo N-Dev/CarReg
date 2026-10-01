@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.github.ndev.roadsight.core.VideoAndDaysTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-09-30T23:11:14.841Z" hostname="runnervmtr4k5" time="0.085">
+  <properties/>
+  <testcase name="coloursComeOutRight" classname="io.github.ndev.roadsight.core.VideoAndDaysTest" time="0.024"/>
+  <testcase name="severalDaysByDayAndByHourOfTheDay" classname="io.github.ndev.roadsight.core.VideoAndDaysTest" time="0.048"/>
+  <testcase name="interleavedChromaAndACropWork" classname="io.github.ndev.roadsight.core.VideoAndDaysTest" time="0.005"/>
+  <testcase name="framesTurnUprightAndShrink" classname="io.github.ndev.roadsight.core.VideoAndDaysTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

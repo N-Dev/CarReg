@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.github.ndev.roadsight.core.PlateLogicTest" tests="15" skipped="0" failures="0" errors="0" timestamp="2026-09-30T23:11:14.138Z" hostname="runnervmtr4k5" time="0.044">
+  <properties/>
+  <testcase name="aDifferentPlateInTheSameSpotStartsANewTrack" classname="io.github.ndev.roadsight.core.PlateLogicTest" time="0.007"/>
+  <testcase name="votingIgnoresLowConfidenceReadsAndUnknownRegions" classname="io.github.ndev.roadsight.core.PlateLogicTest" time="0.0"/>
+  <testcase name="votesNeverBlendTwoDifferentPlatesIntoAThird" classname="io.github.ndev.roadsight.core.PlateLogicTest" time="0.004"/>
+  <testcase name="editDistanceAndSimilarity" classname="io.github.ndev.roadsight.core.PlateLogicTest" time="0.001"/>
+  <testcase name="aPlateLeavingTheFrameKeepsItsFullReading" classname="io.github.ndev.roadsight.core.PlateLogicTest" time="0.003"/>
+  <testcase name="singleReadIsNeverConfirmedOnItsOwn" classname="io.github.ndev.roadsight.core.PlateLogicTest" time="0.0"/>
+  <testcase name="aPlateEnteringCutOffIsReadAsOnePlateOnceFullyVisible" classname="io.github.ndev.roadsight.core.PlateLogicTest" time="0.004"/>
+  <testcase name="votingFixesNoisyFramesAndPicksTheCountry" classname="io.github.ndev.roadsight.core.PlateLogicTest" time="0.001"/>
+  <testcase name="ukAndNorthernIrishPlates" classname="io.github.ndev.roadsight.core.PlateLogicTest" time="0.006"/>
+  <testcase name="jsonRoundTrip" classname="io.github.ndev.roadsight.core.PlateLogicTest" time="0.001"/>
+  <testcase name="trackerKeepsOneIdentityPerMovingPlateAndConfirmsAfterAgreement" classname="io.github.ndev.roadsight.core.PlateLogicTest" time="0.007"/>
+  <testcase name="irishPlates" classname="io.github.ndev.roadsight.core.PlateLogicTest" time="0.001"/>
+  <testcase name="profilesAndFlags" classname="io.github.ndev.roadsight.core.PlateLogicTest" time="0.0"/>
+  <testcase name="aPlateOnlyEverSeenCutOffIsNeverConfirmed" classname="io.github.ndev.roadsight.core.PlateLogicTest" time="0.006"/>
+  <testcase name="anUnsureReadDoesNotSplitATrack" classname="io.github.ndev.roadsight.core.PlateLogicTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

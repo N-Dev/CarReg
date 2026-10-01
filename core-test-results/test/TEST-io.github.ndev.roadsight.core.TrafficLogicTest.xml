@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.github.ndev.roadsight.core.TrafficLogicTest" tests="13" skipped="0" failures="0" errors="0" timestamp="2026-09-30T23:11:14.726Z" hostname="runnervmtr4k5" time="0.109">
+  <properties/>
+  <testcase name="crossingOnlyOneLineCountsWithoutASpeed" classname="io.github.ndev.roadsight.core.TrafficLogicTest" time="0.007"/>
+  <testcase name="speedsStayRightAtALowFrameRate" classname="io.github.ndev.roadsight.core.TrafficLogicTest" time="0.009"/>
+  <testcase name="aRoadRunningAwayIsCountedWithLevelLines" classname="io.github.ndev.roadsight.core.TrafficLogicTest" time="0.009"/>
+  <testcase name="totalsPerHourBusiestHourAndLongVehicles" classname="io.github.ndev.roadsight.core.TrafficLogicTest" time="0.001"/>
+  <testcase name="linesInterpolateCrossingTimesAndAllowForPerspective" classname="io.github.ndev.roadsight.core.TrafficLogicTest" time="0.001"/>
+  <testcase name="csvOneRowPerRoadUser" classname="io.github.ndev.roadsight.core.TrafficLogicTest" time="0.01"/>
+  <testcase name="aParkedCarOrSomeoneStandingOnALineIsNeverCounted" classname="io.github.ndev.roadsight.core.TrafficLogicTest" time="0.018"/>
+  <testcase name="theOtherWayIsDirection2AndALorryIsLong" classname="io.github.ndev.roadsight.core.TrafficLogicTest" time="0.001"/>
+  <testcase name="speedFigures" classname="io.github.ndev.roadsight.core.TrafficLogicTest" time="0.001"/>
+  <testcase name="aCarCrossingBothLinesIsCountedOnceWithDirectionSpeedAndLength" classname="io.github.ndev.roadsight.core.TrafficLogicTest" time="0.001"/>
+  <testcase name="hiddenForAMomentBetweenTheLinesIsStillOneVehicleWithASpeed" classname="io.github.ndev.roadsight.core.TrafficLogicTest" time="0.0"/>
+  <testcase name="followingVehiclesBothDirectionsAndEveryKind" classname="io.github.ndev.roadsight.core.TrafficLogicTest" time="0.03"/>
+  <testcase name="aCyclistCountsAsABicycleNotAlsoAsAPedestrian" classname="io.github.ndev.roadsight.core.TrafficLogicTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

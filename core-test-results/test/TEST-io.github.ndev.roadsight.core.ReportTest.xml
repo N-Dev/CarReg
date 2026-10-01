@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.github.ndev.roadsight.core.ReportTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-09-30T23:11:14.189Z" hostname="runnervmtr4k5" time="0.515">
+  <properties/>
+  <testcase name="reportIsOnePageWithTheFigures" classname="io.github.ndev.roadsight.core.ReportTest" time="0.488"/>
+  <testcase name="pdfStructureEscapingAndWidths" classname="io.github.ndev.roadsight.core.ReportTest" time="0.015"/>
+  <testcase name="reportTextHelpers" classname="io.github.ndev.roadsight.core.ReportTest" time="0.009"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

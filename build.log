@@ -1,0 +1,258 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.14.3/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :core:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:processResources NO-SOURCE
+> Task :core:processTestResources NO-SOURCE
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preReleaseBuild UP-TO-DATE
+> Task :app:mergeReleaseJniLibFolders
+> Task :app:checkReleaseDuplicateClasses
+> Task :app:buildKotlinToolingMetadata
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:generateReleaseBuildConfig
+> Task :app:generateReleaseResValues FROM-CACHE
+> Task :app:checkReleaseAarMetadata
+> Task :app:mapReleaseSourceSetPaths
+> Task :app:generateReleaseResources
+> Task :app:packageReleaseResources
+> Task :app:mergeReleaseResources
+> Task :app:createReleaseCompatibleScreenManifests
+> Task :app:extractDeepLinksRelease FROM-CACHE
+> Task :app:parseReleaseLocalResources
+> Task :app:processReleaseMainManifest
+> Task :app:processReleaseManifest
+> Task :app:javaPreCompileRelease FROM-CACHE
+> Task :app:desugarReleaseFileDependencies FROM-CACHE
+> Task :app:mergeReleaseStartupProfile
+> Task :app:processReleaseManifestForPackage
+> Task :app:mergeReleaseArtProfile
+> Task :app:mergeReleaseShaders
+> Task :app:compileReleaseShaders NO-SOURCE
+> Task :app:copyReleaseModels
+> Task :app:generateReleaseAssets UP-TO-DATE
+> Task :app:mergeReleaseAssets
+> Task :app:compressReleaseAssets FROM-CACHE
+> Task :app:processReleaseResources
+> Task :app:extractReleaseVersionControlInfo
+> Task :app:collectReleaseDependencies
+> Task :app:sdkReleaseDependencyData
+> Task :app:validateSigningRelease
+> Task :app:writeReleaseAppMetadata
+> Task :app:writeReleaseSigningConfigVersions
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:mergeDebugNativeDebugMetadata NO-SOURCE
+> Task :app:generateDebugBuildConfig
+> Task :app:checkDebugAarMetadata
+> Task :app:optimizeReleaseResources
+> Task :app:generateDebugResValues FROM-CACHE
+> Task :app:mapDebugSourceSetPaths
+> Task :app:generateDebugResources
+> Task :app:packageDebugResources
+> Task :app:parseDebugLocalResources FROM-CACHE
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug FROM-CACHE
+> Task :app:processDebugMainManifest
+> Task :app:processDebugManifest
+> Task :app:processDebugManifestForPackage
+> Task :app:javaPreCompileDebug FROM-CACHE
+> Task :app:mergeDebugShaders
+> Task :app:compileDebugShaders NO-SOURCE
+> Task :app:mergeDebugResources
+> Task :app:copyDebugModels
+> Task :app:generateDebugAssets UP-TO-DATE
+> Task :app:mergeDebugAssets
+> Task :app:processDebugResources
+> Task :app:compressDebugAssets FROM-CACHE
+> Task :app:desugarDebugFileDependencies FROM-CACHE
+> Task :app:checkDebugDuplicateClasses
+> Task :app:mergeDebugJniLibFolders
+> Task :app:validateSigningDebug
+> Task :app:writeDebugAppMetadata
+> Task :app:writeDebugSigningConfigVersions
+> Task :app:preDebugAndroidTestBuild SKIPPED
+> Task :app:processDebugAndroidTestManifest
+> Task :app:generateDebugAndroidTestBuildConfig FROM-CACHE
+> Task :app:checkDebugAndroidTestAarMetadata
+> Task :app:generateDebugAndroidTestResValues FROM-CACHE
+> Task :app:mapDebugAndroidTestSourceSetPaths
+> Task :app:generateDebugAndroidTestResources FROM-CACHE
+> Task :app:mergeDebugAndroidTestResources FROM-CACHE
+> Task :app:processDebugAndroidTestResources FROM-CACHE
+> Task :app:javaPreCompileDebugAndroidTest FROM-CACHE
+> Task :app:mergeDebugAndroidTestShaders
+> Task :app:compileDebugAndroidTestShaders NO-SOURCE
+> Task :app:generateDebugAndroidTestAssets UP-TO-DATE
+> Task :app:mergeDebugAndroidTestAssets
+> Task :app:compressDebugAndroidTestAssets
+> Task :app:desugarDebugAndroidTestFileDependencies FROM-CACHE
+> Task :app:checkDebugAndroidTestDuplicateClasses
+> Task :app:mergeExtDexDebugAndroidTest FROM-CACHE
+> Task :app:mergeDebugAndroidTestJniLibFolders
+> Task :app:validateSigningDebugAndroidTest
+> Task :app:writeDebugAndroidTestSigningConfigVersions
+> Task :app:mergeExtDexRelease
+> Task :app:mergeExtDexDebug
+> Task :core:compileKotlin
+> Task :core:compileJava NO-SOURCE
+> Task :core:classes UP-TO-DATE
+> Task :core:jar
+> Task :app:mergeReleaseNativeLibs
+
+> Task :app:stripReleaseDebugSymbols
+Unable to strip the following libraries, packaging them as they are: libandroidx.graphics.path.so, libimage_processing_util_jni.so, libonnxruntime.so, libonnxruntime4j_jni.so, libsurface_util_jni.so.
+
+> Task :app:extractReleaseNativeSymbolTables FROM-CACHE
+> Task :app:mergeReleaseNativeDebugMetadata NO-SOURCE
+> Task :app:mergeLibDexDebug
+> Task :app:mergeDebugNativeLibs
+
+> Task :app:stripDebugDebugSymbols
+Unable to strip the following libraries, packaging them as they are: libandroidx.graphics.path.so, libimage_processing_util_jni.so, libonnxruntime.so, libonnxruntime4j_jni.so, libsurface_util_jni.so.
+
+> Task :app:mergeLibDexDebugAndroidTest FROM-CACHE
+> Task :app:mergeDebugAndroidTestNativeLibs NO-SOURCE
+> Task :app:stripDebugAndroidTestDebugSymbols NO-SOURCE
+> Task :core:compileTestKotlin
+> Task :core:compileTestJava NO-SOURCE
+> Task :core:testClasses UP-TO-DATE
+
+> Task :core:test
+
+ModelsTest > photoModeReadsAUkPlate PASSED
+
+ModelsTest > vehiclesAreFoundByBothModels STANDARD_OUT
+    tiny: 5 road users, AI 111 ms
+    nano: 5 road users, AI 42 ms
+
+ModelsTest > vehiclesAreFoundByBothModels PASSED
+
+ModelsTest > liveModeReadsAPortraitFrameInItsCentreSquare STANDARD_OUT
+    live frame: find 99 ms, read 6 ms
+
+ModelsTest > liveModeReadsAPortraitFrameInItsCentreSquare PASSED
+
+ModelsTest > countsAndTimesCarsOnASyntheticRoad STANDARD_OUT
+    synthetic road: [TrafficRecord(t=3044.2538008223873, kind=car, dir=1, speed=39.7, length=20.3, conf=0.66, frames=82), TrafficRecord(t=7061.26254872348, kind=truck, dir=2, speed=59.9, length=15.6, conf=0.36, frames=46)]
+
+ModelsTest > countsAndTimesCarsOnASyntheticRoad PASSED
+
+ModelsTest > photoModeReadsBothPlatesAndTheirCountries PASSED
+
+PlateLogicTest > aDifferentPlateInTheSameSpotStartsANewTrack PASSED
+
+PlateLogicTest > votingIgnoresLowConfidenceReadsAndUnknownRegions PASSED
+
+PlateLogicTest > votesNeverBlendTwoDifferentPlatesIntoAThird PASSED
+
+PlateLogicTest > editDistanceAndSimilarity PASSED
+
+PlateLogicTest > aPlateLeavingTheFrameKeepsItsFullReading PASSED
+
+PlateLogicTest > singleReadIsNeverConfirmedOnItsOwn PASSED
+
+PlateLogicTest > aPlateEnteringCutOffIsReadAsOnePlateOnceFullyVisible PASSED
+
+PlateLogicTest > votingFixesNoisyFramesAndPicksTheCountry PASSED
+
+PlateLogicTest > ukAndNorthernIrishPlates PASSED
+
+PlateLogicTest > jsonRoundTrip PASSED
+
+PlateLogicTest > trackerKeepsOneIdentityPerMovingPlateAndConfirmsAfterAgreement PASSED
+
+PlateLogicTest > irishPlates PASSED
+
+PlateLogicTest > profilesAndFlags PASSED
+
+PlateLogicTest > aPlateOnlyEverSeenCutOffIsNeverConfirmed PASSED
+
+PlateLogicTest > anUnsureReadDoesNotSplitATrack PASSED
+
+ReportTest > reportIsOnePageWithTheFigures PASSED
+
+ReportTest > pdfStructureEscapingAndWidths PASSED
+
+ReportTest > reportTextHelpers PASSED
+
+TrafficLogicTest > crossingOnlyOneLineCountsWithoutASpeed PASSED
+
+TrafficLogicTest > speedsStayRightAtALowFrameRate PASSED
+
+TrafficLogicTest > aRoadRunningAwayIsCountedWithLevelLines PASSED
+
+TrafficLogicTest > totalsPerHourBusiestHourAndLongVehicles PASSED
+
+TrafficLogicTest > linesInterpolateCrossingTimesAndAllowForPerspective PASSED
+
+TrafficLogicTest > csvOneRowPerRoadUser PASSED
+
+TrafficLogicTest > aParkedCarOrSomeoneStandingOnALineIsNeverCounted PASSED
+
+TrafficLogicTest > theOtherWayIsDirection2AndALorryIsLong PASSED
+
+TrafficLogicTest > speedFigures PASSED
+
+TrafficLogicTest > aCarCrossingBothLinesIsCountedOnceWithDirectionSpeedAndLength PASSED
+
+TrafficLogicTest > hiddenForAMomentBetweenTheLinesIsStillOneVehicleWithASpeed PASSED
+
+TrafficLogicTest > followingVehiclesBothDirectionsAndEveryKind PASSED
+
+TrafficLogicTest > aCyclistCountsAsABicycleNotAlsoAsAPedestrian PASSED
+
+VideoAndDaysTest > coloursComeOutRight PASSED
+
+VideoAndDaysTest > severalDaysByDayAndByHourOfTheDay PASSED
+
+VideoAndDaysTest > interleavedChromaAndACropWork PASSED
+
+VideoAndDaysTest > framesTurnUprightAndShrink PASSED
+
+> Task :app:compileReleaseKotlin
+w: file:///home/runner/work/CarReg/CarReg/android/app/src/main/kotlin/io/github/ndev/roadsight/App.kt:284:40 Unchecked cast of 'Any?' to 'List<Double>'.
+
+> Task :app:compileDebugKotlin
+w: file:///home/runner/work/CarReg/CarReg/android/app/src/main/kotlin/io/github/ndev/roadsight/App.kt:284:40 Unchecked cast of 'Any?' to 'List<Double>'.
+
+> Task :app:compileDebugJavaWithJavac
+> Task :app:compileReleaseJavaWithJavac
+> Task :app:dexBuilderRelease
+> Task :app:mergeReleaseGlobalSynthetics FROM-CACHE
+> Task :app:processReleaseJavaRes
+> Task :app:mergeReleaseJavaResource
+> Task :app:mergeDexRelease
+> Task :app:dexBuilderDebug
+> Task :app:mergeDebugGlobalSynthetics FROM-CACHE
+> Task :app:processDebugJavaRes
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:mergeProjectDexDebug
+> Task :app:mergeDebugJavaResource
+> Task :app:compileReleaseArtProfile
+> Task :app:packageDebug
+> Task :app:createDebugApkListingFileRedirect
+> Task :app:assembleDebug
+> Task :app:compileDebugAndroidTestKotlin
+> Task :app:compileDebugAndroidTestJavaWithJavac
+> Task :app:dexBuilderDebugAndroidTest
+> Task :app:packageRelease
+> Task :app:createReleaseApkListingFileRedirect
+> Task :app:assembleRelease
+> Task :app:mergeDebugAndroidTestGlobalSynthetics FROM-CACHE
+> Task :app:processDebugAndroidTestJavaRes
+> Task :app:mergeProjectDexDebugAndroidTest
+> Task :app:mergeDebugAndroidTestJavaResource
+> Task :app:packageDebugAndroidTest
+> Task :app:createDebugAndroidTestApkListingFileRedirect
+> Task :app:assembleDebugAndroidTest
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run_2-1790809817073.json
+
+[Incubating] Problems report is available at: file:///home/runner/work/CarReg/CarReg/android/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.14.3/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 1m 28s
+117 actionable tasks: 93 executed, 24 from cache

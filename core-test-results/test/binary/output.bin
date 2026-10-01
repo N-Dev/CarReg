@@ -1,0 +1,4 @@
+tiny: 5 road users, AI 111 ms
+nano: 5 road users, AI 42 ms
+"live frame: find 99 ms, read 6 ms
+Ûsynthetic road: [TrafficRecord(t=3044.2538008223873, kind=car, dir=1, speed=39.7, length=20.3, conf=0.66, frames=82), TrafficRecord(t=7061.26254872348, kind=truck, dir=2, speed=59.9, length=15.6, conf=0.36, frames=46)]
