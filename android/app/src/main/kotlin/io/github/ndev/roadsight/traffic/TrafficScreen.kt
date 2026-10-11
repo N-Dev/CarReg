@@ -99,6 +99,10 @@ import io.github.ndev.roadsight.debug.rememberHealth
 import io.github.ndev.roadsight.camera.CameraHost
 import io.github.ndev.roadsight.camera.CameraPreview
 import io.github.ndev.roadsight.camera.CameraUse
+import io.github.ndev.roadsight.camera.FocusHeldPill
+import io.github.ndev.roadsight.camera.FocusRing
+import io.github.ndev.roadsight.camera.FocusTap
+import androidx.compose.ui.platform.testTag
 import io.github.ndev.roadsight.camera.zoomLabel
 import io.github.ndev.roadsight.camera.zoomSteps
 import io.github.ndev.roadsight.core.traffic.directionNames
@@ -190,6 +194,11 @@ fun TrafficScreen(onVideo: () -> Unit = {}) {
     // The camera is watching for plates in the background: it can't count traffic at the same time.
     val busy = bg != null && bg?.sink !== app.traffic
     val use = remember { CameraUse(app.traffic, CameraHost.TRAFFIC_RES, "traffic") }
+    val focusMode by host.focusMode.collectAsState()
+    var tap by remember { mutableStateOf<FocusTap?>(null) }
+    // The focus setting (⋮ menu or Settings) applies at once.
+    val far = prefs.trafficFocusFar
+    LaunchedEffect(far) { host.refreshFocus() }
     val askNotifications = rememberNotificationRequest()
     val here = if (landscape) "landscape" else "portrait"
 
@@ -359,8 +368,12 @@ fun TrafficScreen(onVideo: () -> Unit = {}) {
                 if (!busy) TrafficOverlay(
                     ui = ui, lines = lines, distanceM = if (editing) distanceText.replace(',', '.').toDoubleOrNull() ?: prefs.distanceM else prefs.distanceM,
                     editing = editing, aspect = aspect, roi = roi, debug = prefs.debug,
-                    modifier = Modifier.fillMaxSize().pointerInput(editing, aspect) {
-                        if (!editing) return@pointerInput
+                    modifier = Modifier.fillMaxSize().testTag("camera-picture").pointerInput(editing, aspect) {
+                        if (!editing) {
+                            // Tap to focus on that spot (and hold it there), e.g. on the road.
+                            detectTapGestures { p -> if (host.focusAt(p.x, p.y)) tap = FocusTap(p) }
+                            return@pointerInput
+                        }
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false)
                             val r = videoRect(size.width.toFloat(), size.height.toFloat(), aspect)
@@ -408,6 +421,14 @@ fun TrafficScreen(onVideo: () -> Unit = {}) {
                                     },
                                 )
                                 DropdownMenuItem(
+                                    text = { Text("Focus far away") },
+                                    leadingIcon = { Checkbox(checked = prefs.trafficFocusFar, onCheckedChange = null) },
+                                    onClick = {
+                                        menu = false
+                                        prefs.trafficFocusFar = !prefs.trafficFocusFar
+                                    },
+                                )
+                                DropdownMenuItem(
                                     text = { Text("Count traffic in a video") },
                                     enabled = !ui.running && !editing,
                                     onClick = {
@@ -428,6 +449,10 @@ fun TrafficScreen(onVideo: () -> Unit = {}) {
                         }
                     }
                     if (prefs.debug && !busy && !editing && ui.ready) TrafficDebug(ui, Modifier.padding(horizontal = 12.dp))
+                }
+                if (!busy) FocusRing(tap, Modifier.fillMaxSize())
+                if (focusMode == "held" && !busy && !editing) {
+                    FocusHeldPill(Modifier.align(Alignment.BottomCenter).padding(10.dp)) { host.refreshFocus() }
                 }
                 if (editing) {
                     Text(
@@ -846,9 +871,11 @@ internal fun TrafficOverlay(ui: TrafficUi, lines: Lines, distanceM: Double, edit
 @Composable
 private fun TrafficDebug(ui: TrafficUi, modifier: Modifier = Modifier) {
     val camFps by App.instance.camera.cameraFps.collectAsState()
+    val focus by App.instance.camera.focus.collectAsState()
     val health = rememberHealth(true)
     val lines = buildList {
         add("camera %.1f fps · analysed %.1f fps · %d frames".format(camFps, ui.fps, ui.frames))
+        focus?.let { add(it.text()) }
         add("picture %.0f ms · AI %.0f ms · after %.0f ms · %s (%s)".format(ui.msPrep, ui.msAi, ui.msPost, ui.model, ui.modelKey))
         add(
             "frame ${ui.frameW}×${ui.frameH} · area %.0f%%×%.0f%% · %d found · %d tracked%s".format(

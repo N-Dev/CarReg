@@ -163,6 +163,11 @@ fun SettingsScreen() {
                 Segmented(listOf("auto" to "Auto", "fast" to "Fast", "balanced" to "Balanced", "sharp" to "Sharp"), p.quality) { p.quality = it }
             }
             SwitchRow("Vibrate on a new plate or count", checked = p.haptics) { p.haptics = it }
+            SwitchRow(
+                "Focus far away",
+                "For plates more than a few metres off: the camera holds its focus at a distance instead of refocusing on things close to it. Or tap the picture to focus on one spot.",
+                checked = p.platesFocusFar,
+            ) { p.platesFocusFar = it }
             val watched = watchRows.count { it.mode == Watchlist.WATCH }
             val ignored = watchRows.size - watched
             NavRow(
@@ -185,6 +190,11 @@ fun SettingsScreen() {
             SettingRow("Dim the screen while counting", "Saves battery and heat. Tap to wake.") {
                 Segmented(listOf("0" to "Never", "60" to "After 1 min", "300" to "After 5 min"), p.dimAfter.toString()) { p.dimAfter = it.toInt() }
             }
+            SwitchRow(
+                "Focus far away",
+                "The camera holds its focus on the road instead of refocusing on things close to it, like a window, a hedge or someone walking past. Or tap the picture to focus on one spot.",
+                checked = p.trafficFocusFar,
+            ) { p.trafficFocusFar = it }
             SwitchRow(
                 "Keep counting with the screen off",
                 "Counting carries on if the screen goes off or you open another app. A notification shows meanwhile, with a Stop button.",

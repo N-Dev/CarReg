@@ -80,6 +80,11 @@ import kotlinx.coroutines.delay
 import io.github.ndev.roadsight.camera.CameraHost
 import io.github.ndev.roadsight.camera.CameraPreview
 import io.github.ndev.roadsight.camera.CameraUse
+import io.github.ndev.roadsight.camera.FocusHeldPill
+import io.github.ndev.roadsight.camera.FocusRing
+import io.github.ndev.roadsight.camera.FocusTap
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.platform.testTag
 import io.github.ndev.roadsight.camera.zoomLabel
 import io.github.ndev.roadsight.camera.zoomSteps
 import io.github.ndev.roadsight.service.BackgroundService
@@ -166,6 +171,11 @@ private fun LiveScreen(app: App, ui: PlateUi, notice: String?, onPick: () -> Uni
     val askNotifications = rememberNotificationRequest()
     val use = remember { CameraUse(app.plates, CameraHost.PLATES_RES, "plates") }
     val debug = app.prefs.debug
+    val focusMode by host.focusMode.collectAsState()
+    var tap by remember { mutableStateOf<FocusTap?>(null) }
+    // The focus setting (⋮ menu or Settings) applies at once.
+    val far = app.prefs.platesFocusFar
+    LaunchedEffect(far) { host.refreshFocus() }
     val hit by app.watch.lastHit.collectAsState()
     var showHit by remember { mutableStateOf<Watchlist.Hit?>(null) }
     LaunchedEffect(hit) {
@@ -201,17 +211,21 @@ private fun LiveScreen(app: App, ui: PlateUi, notice: String?, onPick: () -> Uni
             }
         } else if (!paused) {
             Box(
-                Modifier.fillMaxSize().pointerInput(Unit) {
+                Modifier.fillMaxSize().testTag("camera-picture").pointerInput(Unit) {
                     // Pinch to zoom, from the ultra-wide lens (if the phone has one) to the longest zoom.
                     detectTransformGestures { _, _, change, _ ->
                         val z = host.zoom.value
                         val next = zoom * change
                         zoom = if (z != null) next.coerceIn(z.min, z.max) else next.coerceIn(0.5f, 10f)
                     }
+                }.pointerInput(Unit) {
+                    // Tap to focus on that spot (and hold it there).
+                    detectTapGestures { p -> if (host.focusAt(p.x, p.y)) tap = FocusTap(p) }
                 },
             ) {
                 CameraPreview(Modifier.fillMaxSize(), use, zoom)
                 LiveOverlay(ui, debug, Modifier.fillMaxSize())
+                FocusRing(tap, Modifier.fillMaxSize())
             }
         } else {
             Column(Modifier.align(Alignment.Center).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -268,6 +282,14 @@ private fun LiveScreen(app: App, ui: PlateUi, notice: String?, onPick: () -> Uni
                             },
                         )
                         DropdownMenuItem(
+                            text = { Text("Focus far away") },
+                            leadingIcon = { Checkbox(checked = app.prefs.platesFocusFar, onCheckedChange = null) },
+                            onClick = {
+                                menu = false
+                                app.prefs.platesFocusFar = !app.prefs.platesFocusFar
+                            },
+                        )
+                        DropdownMenuItem(
                             text = { Text("Read plates in a video") },
                             onClick = {
                                 menu = false
@@ -295,6 +317,9 @@ private fun LiveScreen(app: App, ui: PlateUi, notice: String?, onPick: () -> Uni
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
             notice?.let {
                 Text(it, color = C.amber, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp))
+            }
+            if (focusMode == "held" && !paused && !busy) {
+                FocusHeldPill(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 8.dp)) { host.refreshFocus() }
             }
             val steps = zoomSteps(zoomInfo)
             if (!paused && !busy && steps.isNotEmpty()) {
@@ -495,9 +520,11 @@ private val HIT_TIME = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss").
 @Composable
 private fun PlatesDebug(ui: PlateUi, modifier: Modifier = Modifier) {
     val camFps by App.instance.camera.cameraFps.collectAsState()
+    val focus by App.instance.camera.focus.collectAsState()
     val health = rememberHealth(true)
     val lines = buildList {
         add("camera %.1f fps · analysed %.1f fps · %d frames".format(camFps, ui.fps, ui.frames))
+        focus?.let { add(it.text()) }
         add("find %.0f ms · read %.0f ms · total %.0f ms".format(ui.msFind, ui.msRead, ui.msTotal))
         add("${ui.tier}${if (ui.reason.isNotEmpty()) " (${ui.reason})" else ""} · reader ${ui.reader}${if (ui.idle) " · idle" else ""}")
         add("frame ${ui.frameW}×${ui.frameH}" + (ui.region?.let { " · area ${it[2]}×${it[3]}" } ?: "") + " · ${ui.raw.size} found · ${ui.boxes.size} tracked")

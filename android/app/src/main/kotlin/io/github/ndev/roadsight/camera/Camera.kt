@@ -3,9 +3,21 @@ package io.github.ndev.roadsight.camera
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Matrix
+import android.hardware.camera2.CameraCaptureSession
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraMetadata
+import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.CaptureResult
+import android.hardware.camera2.TotalCaptureResult
 import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import androidx.camera.camera2.interop.Camera2CameraControl
+import androidx.camera.camera2.interop.Camera2CameraInfo
+import androidx.camera.camera2.interop.Camera2Interop
+import androidx.camera.camera2.interop.CaptureRequestOptions
+import androidx.camera.core.FocusMeteringAction
 import android.util.Size
 import android.view.Surface
 import androidx.camera.core.AspectRatio
@@ -84,6 +96,32 @@ data class CameraUse(val sink: FrameSink, val resolution: Size, val name: String
 class ZoomInfo(val ratio: Float, val min: Float, val max: Float)
 
 /**
+ * How the camera is focusing: `mode` is auto (the camera chooses, and refocuses), far (held at a
+ * distance), held (on a spot that was tapped) or fixed (a lens that can't focus). For the screens and
+ * debug mode.
+ */
+class FocusInfo(
+    val mode: String,
+    /** The lens can be held at a distance (manual focus). */
+    val manual: Boolean,
+    /** Where "far" holds the lens (metres; null = infinity, or the lens can't say). */
+    val farMetres: Double?,
+    /** Where the lens is focused now (metres; null = infinity or unknown), from the camera's last frame. */
+    val lensMetres: Double?,
+    val calibrated: Boolean,
+    val afState: Int?,
+) {
+    fun text(): String {
+        val af = when (afState) {
+            0 -> "idle"; 1 -> "searching"; 2 -> "focused"; 3 -> "searching"; 4 -> "locked"; 5 -> "locked, not sharp"; 6 -> "not sharp"; else -> "?"
+        }
+        val lens = if (!calibrated) "uncalibrated lens" else lensMetres?.let { "lens at %.1f m".format(it) } ?: "lens at infinity"
+        val far = if (mode == "far") farMetres?.let { " (sharp from %.1f m)".format(it / 2) } ?: " (infinity)" else ""
+        return "focus $mode$far · $lens · AF $af${if (!manual && mode != "fixed") " · no manual focus" else ""}"
+    }
+}
+
+/**
  * The back camera, owned by the app rather than by a screen, so it can keep running for counting and
  * plate watching while the screen is off ([keepRunning], used by the background service). A screen
  * shows the picture by attaching its PreviewView ([attach] and [detach]); frames go to one [CameraUse]
@@ -109,6 +147,47 @@ class CameraHost(private val context: Context) : LifecycleOwner {
 
     /** Frames a second arriving from the camera (whether or not they're analysed), for debug mode. */
     val cameraFps = MutableStateFlow(0.0)
+
+    /** How the camera is focusing ("auto", "far", "held" or "fixed"). */
+    val focusMode = MutableStateFlow("auto")
+
+    /** The focus in detail, about twice a second, for debug mode. */
+    val focus = MutableStateFlow<FocusInfo?>(null)
+
+    // What the lens can do, read when the camera is set up.
+    @Volatile
+    private var canFocus = false
+
+    @Volatile
+    private var manualFocus = false
+
+    @Volatile
+    private var calibrated = false
+
+    /** Where "far" holds the lens, in dioptres (1 / metres; 0 = infinity). */
+    @Volatile
+    private var farDiopters = 0f
+    private var held = false
+
+    @Volatile
+    private var lensDiopters: Float? = null
+
+    @Volatile
+    private var afState: Int? = null
+    private var focusPosted = 0L
+
+    /** The lens's position and focus state from each frame the camera takes. */
+    private val captureCallback = object : CameraCaptureSession.CaptureCallback() {
+        override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+            lensDiopters = result.get(CaptureResult.LENS_FOCUS_DISTANCE)
+            afState = result.get(CaptureResult.CONTROL_AF_STATE)
+            val now = SystemClock.elapsedRealtime()
+            if (now - focusPosted > 500) {
+                focusPosted = now
+                publishFocus()
+            }
+        }
+    }
 
     private var provider: ProcessCameraProvider? = null
     private var loading = false
@@ -179,6 +258,97 @@ class CameraHost(private val context: Context) : LifecycleOwner {
         runCatching { cam.cameraControl.setZoomRatio(z) }
     }
 
+    /** What the lens can do: focus at all, be held at a distance, and whether its distances are real. */
+    private fun readLens(cam: Camera) {
+        runCatching {
+            val info = Camera2CameraInfo.from(cam.cameraInfo)
+            val min = info.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
+            val hyper = info.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_HYPERFOCAL_DISTANCE) ?: 0f
+            val cal = info.getCameraCharacteristic(CameraCharacteristics.LENS_INFO_FOCUS_DISTANCE_CALIBRATION)
+                ?: CameraMetadata.LENS_INFO_FOCUS_DISTANCE_CALIBRATION_UNCALIBRATED
+            val caps = info.getCameraCharacteristic(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: IntArray(0)
+            val afModes = info.getCameraCharacteristic(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES) ?: IntArray(0)
+            canFocus = min > 0f
+            calibrated = cal != CameraMetadata.LENS_INFO_FOCUS_DISTANCE_CALIBRATION_UNCALIBRATED
+            manualFocus = canFocus && CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR in caps && CameraMetadata.CONTROL_AF_MODE_OFF in afModes
+            // "Far" focuses at the hyperfocal distance, which keeps everything from half of it to the
+            // horizon sharp; a lens that can't measure its distances is set to infinity.
+            farDiopters = if (calibrated && hyper > 0f && hyper < min) hyper else 0f
+            DebugLog.add(
+                "camera",
+                "Lens: " + (if (!canFocus) "fixed focus" else "focuses from ${if (calibrated) "%.2f m".format(1 / min) else "$min (uncalibrated)"}") +
+                    ", hyperfocal ${if (hyper > 0 && calibrated) "%.1f m".format(1 / hyper) else "unknown"}, manual focus ${if (manualFocus) "yes" else "no"}",
+            )
+        }.onFailure { DebugLog.error("camera", "Couldn't read what the lens can do", it) }
+    }
+
+    /** Applies the focus setting for what the camera is doing (Settings, or the ⋮ menu). Clears a tapped focus. */
+    fun refreshFocus() {
+        if (held) runCatching { camera.value?.cameraControl?.cancelFocusAndMetering() }
+        held = false
+        applyFocus()
+    }
+
+    private fun wantsFar(): Boolean {
+        val p = App.instance.prefs
+        return if (bound?.name == "traffic") p.trafficFocusFar else p.platesFocusFar
+    }
+
+    private fun applyFocus() {
+        val cam = camera.value ?: return
+        if (held) return
+        val c2 = Camera2CameraControl.from(cam.cameraControl)
+        val mode = when {
+            !canFocus -> "fixed"
+            wantsFar() && manualFocus -> "far"
+            else -> "auto"
+        }
+        runCatching {
+            if (mode == "far") {
+                c2.setCaptureRequestOptions(
+                    CaptureRequestOptions.Builder()
+                        .setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_OFF)
+                        .setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, farDiopters)
+                        .build(),
+                )
+            } else {
+                c2.clearCaptureRequestOptions()
+            }
+        }.onFailure { DebugLog.error("camera", "Couldn't set the focus", it) }
+        if (mode != focusMode.value) DebugLog.add("camera", "Focus: $mode" + (if (wantsFar() && !manualFocus && canFocus) " (this camera can't hold a distance)" else ""))
+        focusMode.value = mode
+        publishFocus()
+    }
+
+    /** Focuses on the spot tapped (preview coordinates) and holds it there until [refreshFocus]. */
+    fun focusAt(x: Float, y: Float): Boolean {
+        val cam = camera.value ?: return false
+        val v = view ?: return false
+        if (!canFocus) return false
+        held = true
+        focusMode.value = "held"
+        val point = v.meteringPointFactory.createPoint(x, y)
+        val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE).disableAutoCancel().build()
+        // Far focus turns autofocus off: back on first, then focus on the spot.
+        val cleared = Camera2CameraControl.from(cam.cameraControl).clearCaptureRequestOptions()
+        cleared.addListener({ runCatching { cam.cameraControl.startFocusAndMetering(action) } }, ContextCompat.getMainExecutor(context))
+        DebugLog.add("camera", "Focus held on a tapped spot")
+        publishFocus()
+        return true
+    }
+
+    private fun publishFocus() {
+        val d = lensDiopters
+        focus.value = FocusInfo(
+            mode = focusMode.value,
+            manual = manualFocus,
+            farMetres = if (calibrated && farDiopters > 0f) 1.0 / farDiopters else null,
+            lensMetres = if (calibrated && d != null && d > 0f) 1.0 / d else null,
+            calibrated = calibrated,
+            afState = afState,
+        )
+    }
+
     private fun refresh() {
         val use = background.value ?: shown
         if (use == null) {
@@ -225,10 +395,11 @@ class CameraHost(private val context: Context) : LifecycleOwner {
         camera.value = null
         surfaceView = null
         val aspect = AspectRatioStrategy(AspectRatio.RATIO_16_9, AspectRatioStrategy.FALLBACK_RULE_AUTO)
-        val pv = Preview.Builder()
+        val pvb = Preview.Builder()
             .setResolutionSelector(ResolutionSelector.Builder().setAspectRatioStrategy(aspect).build())
             .setTargetRotation(rotation)
-            .build()
+        Camera2Interop.Extender(pvb).setSessionCaptureCallback(captureCallback)
+        val pv = pvb.build()
         val an = ImageAnalysis.Builder()
             .setResolutionSelector(
                 ResolutionSelector.Builder()
@@ -251,6 +422,9 @@ class CameraHost(private val context: Context) : LifecycleOwner {
             cam.cameraInfo.zoomState.removeObservers(this)
             cam.cameraInfo.zoomState.observe(this) { zs -> zoom.value = ZoomInfo(zs.zoomRatio, zs.minZoomRatio, zs.maxZoomRatio) }
             DebugLog.add("camera", "Camera set up for ${use.name}, asking for ${use.resolution}")
+            readLens(cam)
+            held = false
+            applyFocus()
         } catch (e: Throwable) {
             bound = null
             DebugLog.error("camera", "The camera couldn't start", e)

@@ -229,6 +229,9 @@ class Prefs(context: Context) {
     /** Plates screen zoom (below 1 is the ultra-wide lens). */
     var platesZoom by dbl("p_zoom", 1.0)
 
+    /** Hold the focus at a distance rather than letting the camera refocus on things close to it. */
+    var platesFocusFar by bool("p_focus_far", false)
+
     // ---------------------------------------------------------------- display
     /** auto | portrait | landscape: which way round the app is (the Traffic tab follows its set-up). */
     var orientation by str("orientation", "auto")
@@ -269,6 +272,9 @@ class Prefs(context: Context) {
 
     /** The zoom the lines were set up at. */
     var trafficZoom by dbl("t_zoom", 1.0)
+
+    /** Hold the focus at a distance (the road) rather than letting the camera refocus on things close to it. */
+    var trafficFocusFar by bool("t_focus_far", false)
 
     /** The road runs away from the camera (level lines) rather than across the picture. */
     var roadAway by bool("t_away", false)

@@ -18,6 +18,8 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.click
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
@@ -517,6 +519,39 @@ class ScreensTest {
         } finally {
             for (id in ids) db.deleteSession(id)
             app.dataChanged()
+        }
+    }
+
+    /** Focus: held far away from the ⋮ menu, and held on a spot by tapping the picture. */
+    @Test
+    fun focusFarAwayAndTapToFocus() {
+        val p = app.prefs
+        val far = p.platesFocusFar
+        try {
+            compose.waitUntil(30_000) { app.camera.focus.value != null }
+            val before = app.camera.focus.value!!
+            val canFocus = before.mode != "fixed"
+            Shots.log("focus at the start: ${before.text()}")
+            compose.onNodeWithContentDescription("More").performClick()
+            compose.onNodeWithText("Focus far away").performClick()
+            compose.waitUntil(5_000) { p.platesFocusFar }
+            // Held far away needs a lens that can be set to a distance; others stay on auto (or are fixed).
+            val expected = if (!canFocus) "fixed" else if (before.manual) "far" else "auto"
+            compose.waitUntil(5_000) { app.camera.focusMode.value == expected }
+            settle()
+            Shots.log("focus far away: ${app.camera.focus.value?.text()}")
+            compose.onNodeWithTag("camera-picture").performTouchInput { click(center) }
+            if (canFocus) {
+                compose.waitUntil(5_000) { app.camera.focusMode.value == "held" }
+                waitForText("Focus held", substring = true, timeoutMs = 5_000)
+                settle()
+                Shots.take("34-focus-held")
+                Shots.log("focus held: ${app.camera.focus.value?.text()}")
+                compose.onNodeWithText("Focus held", substring = true).performClick()
+                compose.waitUntil(5_000) { app.camera.focusMode.value == expected }
+            }
+        } finally {
+            p.platesFocusFar = far
         }
     }
 
