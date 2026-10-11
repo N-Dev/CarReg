@@ -76,6 +76,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       - name: On-device tests (emulator)
+        timeout-minutes: 40
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34

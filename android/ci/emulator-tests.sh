@@ -8,7 +8,9 @@ mkdir -p "$OUT/device"
 APK=android/app/build/outputs/apk/debug/app-x86_64-debug.apk
 TEST_APK=android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 
-adb wait-for-device
+# Every step has a time limit: a stuck emulator (it happens now and then on CI runners) fails the run
+# quickly, with its logs, instead of sitting until the job's limit.
+timeout 300 adb wait-for-device || { echo "The emulator never came up"; exit 1; }
 adb shell getprop ro.build.fingerprint > "$OUT/device/emulator.txt"
 adb shell 'cat /proc/cpuinfo | grep "model name" | head -1; nproc' >> "$OUT/device/emulator.txt" 2>&1
 adb install -r -g "$APK" > "$OUT/install.txt" 2>&1 || { cat "$OUT/install.txt"; exit 1; }
@@ -19,11 +21,16 @@ adb logcat -c || true
 adb logcat -v time > "$OUT/logcat.txt" 2>&1 &
 LOGCAT=$!
 
-adb shell am instrument -w -r "$PKG.test/androidx.test.runner.AndroidJUnitRunner" > "$OUT/instrument.txt" 2>&1
+timeout 1800 adb shell am instrument -w -r "$PKG.test/androidx.test.runner.AndroidJUnitRunner" > "$OUT/instrument.txt" 2>&1
+STATUS=$?
+if [ "$STATUS" = 124 ]; then
+  echo "The tests didn't finish in 30 minutes. The last test started:"
+  grep "INSTRUMENTATION_STATUS: test=" "$OUT/instrument.txt" | tail -1
+fi
 kill "$LOGCAT" 2>/dev/null || true
 
 # Screenshots, results.txt, report.pdf: saved by the tests in the app's files (the debug app can be read with run-as).
-adb exec-out run-as "$PKG" tar cf - files/ci 2>/dev/null | tar xf - -C "$OUT/device" 2>/dev/null || true
+timeout 120 adb exec-out run-as "$PKG" tar cf - files/ci 2>/dev/null | tar xf - -C "$OUT/device" 2>/dev/null || true
 ls -la "$OUT/device" "$OUT/device/files/ci" 2>/dev/null || true
 grep -E "RoadSight|AndroidRuntime|FATAL" "$OUT/logcat.txt" > "$OUT/logcat-app.txt" || true
 
