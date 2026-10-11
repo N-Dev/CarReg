@@ -41,11 +41,11 @@ fun FocusRing(tap: FocusTap?, modifier: Modifier) {
     }
 }
 
-/** "Focus held here · tap to let it refocus": shown while the focus is held on a tapped spot. */
+/** "Focus held · tap to release": shown while the focus is held on a spot that was tapped. */
 @Composable
 fun FocusHeldPill(modifier: Modifier = Modifier, onRelease: () -> Unit) {
     Text(
-        "Focus held on the spot you tapped · tap here to let it refocus",
+        "Focus held · tap to release",
         color = C.bg, fontSize = 12.5.sp,
         modifier = modifier.clip(RoundedCornerShape(50)).background(C.amber).clickable(onClick = onRelease)
             .padding(horizontal = 12.dp, vertical = 6.dp),
