@@ -21,11 +21,20 @@ adb logcat -c || true
 adb logcat -v time > "$OUT/logcat.txt" 2>&1 &
 LOGCAT=$!
 
-timeout 1800 adb shell am instrument -w -r "$PKG.test/androidx.test.runner.AndroidJUnitRunner" > "$OUT/instrument.txt" 2>&1
+# The tests take about 6 minutes; after 15 something is stuck.
+timeout 900 adb shell am instrument -w -r "$PKG.test/androidx.test.runner.AndroidJUnitRunner" > "$OUT/instrument.txt" 2>&1
 STATUS=$?
 if [ "$STATUS" = 124 ]; then
-  echo "The tests didn't finish in 30 minutes. The last test started:"
+  echo "The tests didn't finish in 15 minutes. The last test started:"
   grep "INSTRUMENTATION_STATUS: test=" "$OUT/instrument.txt" | tail -1
+  # Where every thread of the app is stuck (app-threads.txt on the android-ci branch).
+  timeout 60 adb root > /dev/null 2>&1
+  timeout 60 adb wait-for-device
+  APP_PID=$(timeout 30 adb shell pidof "$PKG" | tr -d '\r')
+  if [ -n "$APP_PID" ]; then
+    timeout 120 adb shell debuggerd -j "$APP_PID" > "$OUT/app-threads.txt" 2>&1
+    grep -E '^"|^  at |^  - (waiting|locked)' "$OUT/app-threads.txt" | head -200
+  fi
 fi
 kill "$LOGCAT" 2>/dev/null || true
 
