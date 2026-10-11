@@ -1,0 +1,140 @@
+10-11 17:46:55.520 D/AndroidRuntime( 3532): >>>>>> START com.android.internal.os.RuntimeInit uid 2000 <<<<<<
+10-11 17:46:55.523 I/AndroidRuntime( 3532): Using default boot image
+10-11 17:46:55.523 I/AndroidRuntime( 3532): Leaving lock profiling enabled
+10-11 17:46:55.649 D/AndroidRuntime( 3532): Calling main entry com.android.commands.am.Am
+10-11 17:46:58.038 I/RoadSight( 3599): [update] Up to date (1.0.12)
+10-11 17:46:58.587 I/RoadSight( 3599): [engine] Loaded the traffic finder (standard) (vehTiny) with CPU, 4 threads in 305 ms
+10-11 17:46:59.132 I/RoadSightTest( 3599): vehTiny: 5 vehicles · AI 201 ms, picture 40 ms
+10-11 17:46:59.485 I/RoadSight( 3599): [engine] Loaded the plate finder (fast) (det384) with CPU, 4 threads in 694 ms
+10-11 17:46:59.550 I/RoadSight( 3599): [engine] Loaded the traffic finder (light) (vehNano) with CPU, 4 threads in 59 ms
+10-11 17:46:59.741 I/RoadSightTest( 3599): vehNano: 5 vehicles · AI 49 ms, picture 2 ms
+10-11 17:46:59.874 I/RoadSight( 3599): [engine] Loaded the plate reader (fast) (ocrFast) with CPU, 4 threads in 217 ms
+10-11 17:47:00.132 I/RoadSightTest( 3599): det384 + ocrFast: 241-D-12345 · find 54 ms, read 6 ms (CPU, 4 threads)
+10-11 17:47:00.549 I/RoadSight( 3599): [engine] Loaded the plate finder (sharp) (det640) with CPU, 4 threads in 315 ms
+10-11 17:47:00.634 I/RoadSight( 3599): [engine] Loaded the plate reader (accurate) (ocrAcc) with CPU, 4 threads in 78 ms
+10-11 17:47:01.309 I/RoadSightTest( 3599): det640 + ocrAcc: 241-D-12345 · find 226 ms, read 38 ms (CPU, 4 threads)
+10-11 17:47:01.315 I/RoadSight( 3599): [engine] Speed test started
+10-11 17:47:11.785 I/RoadSight( 3599): [engine] Speed test finished: det384 CPU:2 50 ms, det384 CPU:4 51 ms, det384 XNNPACK:4 77 ms, det384 NNAPI:4 297 ms, ocrFast CPU:2 12 ms, ocrFast CPU:4 13 ms, vehNano CPU:2 26 ms, vehNano CPU:4 30 ms, vehNano XNNPACK:4 23 ms, vehNano NNAPI:4 113 ms
+10-11 17:47:11.785 I/RoadSightTest( 3599): speed test: det384 on CPU, 2 threads: 50 ms
+10-11 17:47:11.786 I/RoadSightTest( 3599): speed test: det384 on CPU, 4 threads: 51 ms
+10-11 17:47:11.786 I/RoadSightTest( 3599): speed test: det384 on XNNPACK, 4 threads: 77 ms
+10-11 17:47:11.786 I/RoadSightTest( 3599): speed test: det384 on NNAPI: 297 ms
+10-11 17:47:11.786 I/RoadSightTest( 3599): speed test: ocrFast on CPU, 2 threads: 12 ms
+10-11 17:47:11.786 I/RoadSightTest( 3599): speed test: ocrFast on CPU, 4 threads: 13 ms
+10-11 17:47:11.787 I/RoadSightTest( 3599): speed test: vehNano on CPU, 2 threads: 26 ms
+10-11 17:47:11.787 I/RoadSightTest( 3599): speed test: vehNano on CPU, 4 threads: 30 ms
+10-11 17:47:11.787 I/RoadSightTest( 3599): speed test: vehNano on XNNPACK, 4 threads: 23 ms
+10-11 17:47:11.787 I/RoadSightTest( 3599): speed test: vehNano on NNAPI: 113 ms
+10-11 17:47:12.133 I/RoadSightTest( 3599): photo: [AB12 CDE (United Kingdom), 241-D-12345 (Ireland)] in 324 ms
+10-11 17:47:12.335 I/RoadSightTest( 3599): plate reader on CPU, 2 threads: one crop: 241D12345, three crops: 241D12345
+10-11 17:47:12.386 I/RoadSightTest( 3599): plate reader on XNNPACK, 2 threads: failed (ArrayIndexOutOfBoundsException: length=66; index=66)
+10-11 17:47:12.431 I/RoadSightTest( 3599): plate reader on NNAPI: one crop: 241D12345, three crops: 241D12345
+10-11 17:47:12.583 I/RoadSightTest( 3599): plate finder on CPU, 2 threads: 1 plate(s) in 27 ms
+10-11 17:47:12.758 I/RoadSightTest( 3599): plate finder on XNNPACK, 2 threads: 1 plate(s) in 24 ms
+10-11 17:47:13.364 I/RoadSightTest( 3599): plate finder on NNAPI: 1 plate(s) in 233 ms
+10-11 17:47:19.976 I/RoadSight( 3599): [camera] Camera set up for plates, asking for 1920x1080
+10-11 17:47:19.976 I/RoadSight( 3599): [camera] Lens: focuses from 0.05 m, hyperfocal 5.0 m, manual focus yes
+10-11 17:47:20.057 I/RoadSightTest( 3599): focus at the start: focus auto · lens at infinity · AF ?
+10-11 17:47:22.683 I/RoadSight( 3599): [camera] Focus: far
+10-11 17:47:24.363 I/RoadSightTest( 3599): focus far away: focus far (sharp from 2.5 m) · lens at 5.0 m · AF idle
+10-11 17:47:24.421 I/RoadSight( 3599): [camera] Focus held on a tapped spot
+10-11 17:47:26.379 I/RoadSightTest( 3599): screenshot 34-focus-held
+10-11 17:47:26.382 I/RoadSightTest( 3599): focus held: focus held · lens at 5.0 m · AF locked
+10-11 17:47:26.470 I/RoadSight( 3599): [camera] Focus: far
+10-11 17:47:27.844 I/RoadSight( 3599): [camera] Focus: auto
+10-11 17:47:30.406 I/RoadSight( 3599): [watch] Watching for 241D12345 (Test car)
+10-11 17:47:30.532 I/RoadSight( 3599): [plates] Confirmed 241-D-12345 (Ireland, 100%)
+10-11 17:47:30.533 I/RoadSight( 3599): [watch] Watched plate seen: 241-D-12345 (Test car) from the live camera
+10-11 17:47:30.547 I/RoadSightTest( 3599): watchlist: 241-D-12345 seen, notification shown
+10-11 17:47:30.583 I/RoadSight( 3599): [watch] Ignoring 241D12345
+10-11 17:47:31.294 I/RoadSight( 3599): [plates] Ignored 241-D-12345 (one of your cars)
+10-11 17:47:32.723 I/RoadSight( 3599): [watch] Watching for 241D12345 (Test car)
+10-11 17:47:35.378 I/RoadSightTest( 3599): screenshot 20-watch-hit
+10-11 17:47:38.136 I/RoadSightTest( 3599): screenshot 21-watchlist
+10-11 17:47:39.298 I/RoadSight( 3599): [traffic] Counting started (session 1, 20.0 m, lines upright)
+10-11 17:47:58.134 I/RoadSight( 3599): [traffic] Counting stopped (session 1)
+10-11 17:47:58.935 I/RoadSightTest( 3599): synthetic road: [car dir 1 39.1 km/h 20.3 m, truck dir 2 59.9 km/h 15.5 m]
+10-11 17:48:01.278 I/RoadSightTest( 3599): screenshot 07-session
+10-11 17:48:03.270 I/RoadSightTest( 3599): screenshot 08-report-dialog
+10-11 17:48:04.205 I/RoadSightTest( 3599): camera zoom: 1.0x to 10.0x
+10-11 17:48:05.896 I/RoadSightTest( 3599): screenshot 15-zoom-2x
+10-11 17:48:10.274 I/RoadSightTest( 3599): screenshot 16-plates-landscape
+10-11 17:48:10.447 I/RoadSight( 3599): [camera] Camera set up for traffic, asking for 1280x720
+10-11 17:48:10.447 I/RoadSight( 3599): [camera] Lens: focuses from 0.05 m, hyperfocal 5.0 m, manual focus yes
+10-11 17:48:14.614 I/RoadSightTest( 3599): screenshot 17-traffic-landscape
+10-11 17:48:16.672 I/RoadSightTest( 3599): screenshot 18-road-away
+10-11 17:48:18.907 I/RoadSightTest( 3599): screenshot 19-road-away-lines
+10-11 17:48:19.869 I/RoadSight( 3599): [camera] Camera set up for plates, asking for 1920x1080
+10-11 17:48:19.869 I/RoadSight( 3599): [camera] Lens: focuses from 0.05 m, hyperfocal 5.0 m, manual focus yes
+10-11 17:48:20.096 I/RoadSight( 3599): [backup] Backed up: 1 plate, 2 counting sessions, 1 on the watchlist and ignore list
+10-11 17:48:20.096 I/RoadSightTest( 3599): backup: 7703 bytes
+10-11 17:48:20.127 I/RoadSightTest( 3599): backup holds: 1 plate, 2 counting sessions, 1 on the watchlist and ignore list
+10-11 17:48:20.141 I/RoadSight( 3599): [backup] Restored a backup from 1.0.16: 1 plate, 2 counting sessions, 1 on the watchlist and ignore list
+10-11 17:48:22.667 I/RoadSightTest( 3599): screenshot 25-settings-backup
+10-11 17:48:29.423 I/RoadSightTest( 3599): screenshot 01-plates
+10-11 17:48:29.483 I/RoadSight( 3599): [camera] Camera set up for traffic, asking for 1280x720
+10-11 17:48:29.483 I/RoadSight( 3599): [camera] Lens: focuses from 0.05 m, hyperfocal 5.0 m, manual focus yes
+10-11 17:48:34.625 I/RoadSightTest( 3599): screenshot 02-traffic
+10-11 17:48:36.371 I/RoadSightTest( 3599): screenshot 03-traffic-setup
+10-11 17:48:38.223 I/RoadSightTest( 3599): screenshot 04-history
+10-11 17:48:40.026 I/RoadSightTest( 3599): screenshot 05-settings
+10-11 17:48:40.477 I/RoadSight( 3599): [camera] Camera set up for plates, asking for 1920x1080
+10-11 17:48:40.478 I/RoadSight( 3599): [camera] Lens: focuses from 0.05 m, hyperfocal 5.0 m, manual focus yes
+10-11 17:48:40.716 I/RoadSight( 3599): [camera] Camera set up for traffic, asking for 1280x720
+10-11 17:48:40.716 I/RoadSight( 3599): [camera] Lens: focuses from 0.05 m, hyperfocal 5.0 m, manual focus yes
+10-11 17:48:41.094 I/RoadSight( 3599): [traffic] Counting started (session 3, 20.0 m, lines upright)
+10-11 17:48:41.115 I/RoadSight( 3599): [background] Running in the background: traffic
+10-11 17:48:50.206 I/RoadSightTest( 3599): background: 45 frames analysed in 6 s with the app in the background
+10-11 17:48:51.849 I/RoadSight( 3599): [traffic] Counting stopped (session 3)
+10-11 17:48:51.857 I/RoadSight( 3599): [background] Stopped running in the background
+10-11 17:48:52.632 I/RoadSight( 3599): [camera] Camera set up for plates, asking for 1920x1080
+10-11 17:48:52.632 I/RoadSight( 3599): [camera] Lens: focuses from 0.05 m, hyperfocal 5.0 m, manual focus yes
+10-11 17:48:55.205 I/RoadSightTest( 3599): screenshot 32-several-sessions
+10-11 17:48:56.906 I/RoadSightTest( 3599): screenshot 33-several-sessions-report
+10-11 17:48:58.053 I/RoadSight( 3599): [photo] 2 plate(s) in a 3108x993 photo in 515 ms: 241-D-12345, AB12 CDE
+10-11 17:48:59.633 I/RoadSightTest( 3599): screenshot 06-photo
+10-11 17:49:03.293 I/RoadSightTest( 3599): screenshot 22-debug-plates
+10-11 17:49:03.372 I/RoadSight( 3599): [camera] Camera set up for traffic, asking for 1280x720
+10-11 17:49:03.372 I/RoadSight( 3599): [camera] Lens: focuses from 0.05 m, hyperfocal 5.0 m, manual focus yes
+10-11 17:49:06.662 I/RoadSightTest( 3599): screenshot 23-debug-traffic
+10-11 17:49:08.654 I/RoadSightTest( 3599): screenshot 24-debug-log
+10-11 17:49:09.113 I/RoadSight( 3599): [camera] Camera set up for plates, asking for 1920x1080
+10-11 17:49:09.114 I/RoadSight( 3599): [camera] Lens: focuses from 0.05 m, hyperfocal 5.0 m, manual focus yes
+10-11 17:49:10.907 I/RoadSightTest( 3599): screenshot 26-speed-offer
+10-11 17:49:11.606 I/RoadSight( 3599): [camera] Camera set up for traffic, asking for 1280x720
+10-11 17:49:11.607 I/RoadSight( 3599): [camera] Lens: focuses from 0.05 m, hyperfocal 5.0 m, manual focus yes
+10-11 17:49:11.690 I/RoadSight( 3599): [traffic] Counting started (session 6, 20.0 m, lines upright)
+10-11 17:49:11.723 I/RoadSight( 3599): [background] Running in the background: traffic
+10-11 17:49:12.820 I/RoadSightTest( 3599): screenshot 09-counting
+10-11 17:49:14.938 I/RoadSightTest( 3599): screenshot 10-dimmed
+10-11 17:49:15.030 I/RoadSight( 3599): [traffic] Counting stopped (session 6)
+10-11 17:49:15.042 I/RoadSight( 3599): [background] Stopped running in the background
+10-11 17:49:15.166 I/RoadSightTest( 3599): screenshot 11-stopped
+10-11 17:49:16.918 I/RoadSightTest( 3599): screenshot 12-results
+10-11 17:49:17.266 I/RoadSight( 3599): [camera] Camera set up for plates, asking for 1920x1080
+10-11 17:49:17.266 I/RoadSight( 3599): [camera] Lens: focuses from 0.05 m, hyperfocal 5.0 m, manual focus yes
+10-11 17:49:17.431 I/RoadSight( 3599): [camera] Camera set up for traffic, asking for 1280x720
+10-11 17:49:17.431 I/RoadSight( 3599): [camera] Lens: focuses from 0.05 m, hyperfocal 5.0 m, manual focus yes
+10-11 17:49:19.593 I/RoadSightTest( 3599): screenshot 27-video-setup
+10-11 17:49:19.633 I/RoadSight( 3599): [video] Counting a video: 960x540, 11 s, vehNano
+10-11 17:49:22.808 I/RoadSightTest( 3599): screenshot 28-video-counting
+10-11 17:49:28.499 I/RoadSight( 3599): [video] Video counted: 2 road users in 165 frames, 9 s (session 7)
+10-11 17:49:30.053 I/RoadSightTest( 3599): screenshot 29-video-counted
+10-11 17:49:31.681 I/RoadSightTest( 3599): screenshot 30-video-results
+10-11 17:49:31.714 I/RoadSight( 3599): [camera] Camera set up for plates, asking for 1920x1080
+10-11 17:49:31.715 I/RoadSight( 3599): [camera] Lens: focuses from 0.05 m, hyperfocal 5.0 m, manual focus yes
+10-11 17:49:32.164 I/RoadSight( 3599): [video] Reading plates in a video: 1280x720, 4 s
+10-11 17:49:40.327 I/RoadSight( 3599): [video] Video read: 1 plate(s) in 40 frames, 8 s: 241-D-12345
+10-11 17:49:41.900 I/RoadSightTest( 3599): screenshot 31-video-plates
+10-11 17:49:42.291 I/RoadSightTest( 3599): traffic.mp4: 960x540, 11000 ms, 30.0 fps, video/avc, recorded 2026-09-29T07:10:00Z
+10-11 17:49:44.460 I/RoadSightTest( 3599): traffic.mp4: 165 frames at 15 a second, the last at 10933 ms, decoded in 2167 ms
+10-11 17:49:44.908 I/RoadSight( 3599): [video] Counting a video: 960x540, 11 s, vehNano
+10-11 17:49:52.167 I/RoadSight( 3599): [video] Video counted: 2 road users in 165 frames, 7 s (session 8)
+10-11 17:49:52.168 I/RoadSightTest( 3599): video count in 7266 ms: [car dir 1 39.1 km/h 20.2 m, car dir 2 59.2 km/h 15.6 m]
+10-11 17:49:52.188 I/RoadSight( 3599): [video] Reading plates in a video: 1280x720, 4 s
+10-11 17:49:58.953 I/RoadSight( 3599): [video] Video read: 1 plate(s) in 40 frames, 7 s: 241-D-12345
+10-11 17:49:58.953 I/RoadSightTest( 3599): plates.mp4: [241-D-12345 at 0 ms] in 6764 ms
+10-11 17:49:58.984 I/RoadSight( 3599): [video] Reading plates in a video: 720x1280, 4 s
+10-11 17:50:05.553 I/RoadSight( 3599): [video] Video read: 1 plate(s) in 40 frames, 7 s: 241-D-12345
+10-11 17:50:05.553 I/RoadSightTest( 3599): plates-portrait.mp4: [241-D-12345 at 0 ms] in 6569 ms
+10-11 17:50:05.580 I/AndroidRuntime( 3532): VM exiting with result code 0.

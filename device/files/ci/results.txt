@@ -1,0 +1,67 @@
+vehTiny: 5 vehicles · AI 201 ms, picture 40 ms
+vehNano: 5 vehicles · AI 49 ms, picture 2 ms
+det384 + ocrFast: 241-D-12345 · find 54 ms, read 6 ms (CPU, 4 threads)
+det640 + ocrAcc: 241-D-12345 · find 226 ms, read 38 ms (CPU, 4 threads)
+speed test: det384 on CPU, 2 threads: 50 ms
+speed test: det384 on CPU, 4 threads: 51 ms
+speed test: det384 on XNNPACK, 4 threads: 77 ms
+speed test: det384 on NNAPI: 297 ms
+speed test: ocrFast on CPU, 2 threads: 12 ms
+speed test: ocrFast on CPU, 4 threads: 13 ms
+speed test: vehNano on CPU, 2 threads: 26 ms
+speed test: vehNano on CPU, 4 threads: 30 ms
+speed test: vehNano on XNNPACK, 4 threads: 23 ms
+speed test: vehNano on NNAPI: 113 ms
+photo: [AB12 CDE (United Kingdom), 241-D-12345 (Ireland)] in 324 ms
+plate reader on CPU, 2 threads: one crop: 241D12345, three crops: 241D12345
+plate reader on XNNPACK, 2 threads: failed (ArrayIndexOutOfBoundsException: length=66; index=66)
+plate reader on NNAPI: one crop: 241D12345, three crops: 241D12345
+plate finder on CPU, 2 threads: 1 plate(s) in 27 ms
+plate finder on XNNPACK, 2 threads: 1 plate(s) in 24 ms
+plate finder on NNAPI: 1 plate(s) in 233 ms
+focus at the start: focus auto · lens at infinity · AF ?
+focus far away: focus far (sharp from 2.5 m) · lens at 5.0 m · AF idle
+screenshot 34-focus-held
+focus held: focus held · lens at 5.0 m · AF locked
+watchlist: 241-D-12345 seen, notification shown
+screenshot 20-watch-hit
+screenshot 21-watchlist
+synthetic road: [car dir 1 39.1 km/h 20.3 m, truck dir 2 59.9 km/h 15.5 m]
+screenshot 07-session
+screenshot 08-report-dialog
+camera zoom: 1.0x to 10.0x
+screenshot 15-zoom-2x
+screenshot 16-plates-landscape
+screenshot 17-traffic-landscape
+screenshot 18-road-away
+screenshot 19-road-away-lines
+backup: 7703 bytes
+backup holds: 1 plate, 2 counting sessions, 1 on the watchlist and ignore list
+screenshot 25-settings-backup
+screenshot 01-plates
+screenshot 02-traffic
+screenshot 03-traffic-setup
+screenshot 04-history
+screenshot 05-settings
+background: 45 frames analysed in 6 s with the app in the background
+screenshot 32-several-sessions
+screenshot 33-several-sessions-report
+screenshot 06-photo
+screenshot 22-debug-plates
+screenshot 23-debug-traffic
+screenshot 24-debug-log
+screenshot 26-speed-offer
+screenshot 09-counting
+screenshot 10-dimmed
+screenshot 11-stopped
+screenshot 12-results
+screenshot 27-video-setup
+screenshot 28-video-counting
+screenshot 29-video-counted
+screenshot 30-video-results
+screenshot 31-video-plates
+traffic.mp4: 960x540, 11000 ms, 30.0 fps, video/avc, recorded 2026-09-29T07:10:00Z
+traffic.mp4: 165 frames at 15 a second, the last at 10933 ms, decoded in 2167 ms
+video count in 7266 ms: [car dir 1 39.1 km/h 20.2 m, car dir 2 59.2 km/h 15.6 m]
+plates.mp4: [241-D-12345 at 0 ms] in 6764 ms
+plates-portrait.mp4: [241-D-12345 at 0 ms] in 6569 ms

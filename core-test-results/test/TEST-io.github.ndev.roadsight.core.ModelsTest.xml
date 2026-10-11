@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.github.ndev.roadsight.core.ModelsTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-10-11T17:44:02.691Z" hostname="runnervmmprz5" time="2.812">
+  <properties/>
+  <testcase name="photoModeReadsAUkPlate" classname="io.github.ndev.roadsight.core.ModelsTest" time="0.868"/>
+  <testcase name="vehiclesAreFoundByBothModels" classname="io.github.ndev.roadsight.core.ModelsTest" time="0.166"/>
+  <testcase name="liveModeReadsAPortraitFrameInItsCentreSquare" classname="io.github.ndev.roadsight.core.ModelsTest" time="0.102"/>
+  <testcase name="countsAndTimesCarsOnASyntheticRoad" classname="io.github.ndev.roadsight.core.ModelsTest" time="1.514"/>
+  <testcase name="photoModeReadsBothPlatesAndTheirCountries" classname="io.github.ndev.roadsight.core.ModelsTest" time="0.159"/>
+  <system-out><![CDATA[tiny: 5 road users, AI 23 ms
+nano: 5 road users, AI 9 ms
+live frame: find 22 ms, read 3 ms
+synthetic road: [TrafficRecord(t=3044.2538008223873, kind=car, dir=1, speed=39.7, length=20.3, conf=0.66, frames=82), TrafficRecord(t=7061.26254872348, kind=truck, dir=2, speed=59.9, length=15.6, conf=0.36, frames=46)]
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
